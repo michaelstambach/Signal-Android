@@ -4,6 +4,7 @@
  */
 package org.thoughtcrime.securesms.components.settings.app.backups.local
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -110,7 +111,13 @@ class LocalBackupsFragment : ComposeFragment() {
               MessageBackupsKeyEducationScreen(
                 onNavigationClick = { backPressedDispatcher?.onBackPressedDispatcher?.onBackPressed() },
                 onNextClick = { backstack.add(LocalBackupsNavKey.RECORD_RECOVERY_KEY) },
-                mode = MessageBackupsKeyEducationScreenMode.LOCAL_BACKUP_UPGRADE
+                mode = if (args.triggerUpdateFlow) {
+                  MessageBackupsKeyEducationScreenMode.LOCAL_BACKUP_UPGRADE
+                } else if (SignalStore.backup.areBackupsEnabled) {
+                  MessageBackupsKeyEducationScreenMode.LOCAL_WITH_REMOTE_ENABLED
+                } else {
+                  MessageBackupsKeyEducationScreenMode.DEFAULT
+                }
               )
             }
 
@@ -137,16 +144,16 @@ class LocalBackupsFragment : ComposeFragment() {
                 backupKey = state.accountEntropyPool.displayValue,
                 onNavigationClick = { requireActivity().onBackPressedDispatcher.onBackPressed() },
                 onNextClick = {
-                  if (!backstack.contains(LocalBackupsNavKey.SETTINGS)) {
-                    backstack.add(0, LocalBackupsNavKey.SETTINGS)
-                  }
-
-                  backstack.removeAll { it != LocalBackupsNavKey.SETTINGS }
-
                   scope.launch {
                     upgradeInProgress = true
                     viewModel.handleUpgrade(requireContext())
                     upgradeInProgress = false
+
+                    if (!backstack.contains(LocalBackupsNavKey.SETTINGS)) {
+                      backstack.add(0, LocalBackupsNavKey.SETTINGS)
+                    }
+
+                    backstack.removeAll { it != LocalBackupsNavKey.SETTINGS }
 
                     snackbarHostState.showSnackbar(
                       message = backupKeyUpdatedMessage
@@ -170,6 +177,7 @@ class LocalBackupsFragment : ComposeFragment() {
   }
 }
 
+@SuppressLint("LocalContextGetResourceValueCall")
 @Composable
 private fun rememberChooseBackupLocationLauncher(backStack: NavBackStack<NavKey>): ActivityResultLauncher<Uri?> {
   val context = LocalContext.current

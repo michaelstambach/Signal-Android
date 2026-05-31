@@ -12,6 +12,9 @@ import androidx.annotation.RequiresApi;
 
 import org.signal.core.util.logging.Log;
 import org.thoughtcrime.securesms.dependencies.AppDependencies;
+import org.signal.core.util.ByteUnit;
+import org.signal.core.util.ServiceUtil;
+
 
 /**
  * Easy access to various properties of the device, typically to make performance-related decisions.
@@ -25,6 +28,10 @@ public final class DeviceProperties {
    * large numbers of APNGs simultaneously.
    */
   public static boolean shouldAllowApngStickerAnimation(@NonNull Context context) {
+    if (RemoteConfig.newApngRenderer()) {
+      return true;
+    }
+
     MemoryInfo memoryInfo = getMemoryInfo(context);
     int        memoryMb   = (int) ByteUnit.BYTES.toMegabytes(memoryInfo.totalMem);
 

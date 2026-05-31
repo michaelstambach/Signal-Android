@@ -39,6 +39,7 @@ import org.thoughtcrime.securesms.backup.v2.RestoreV2Event
 import org.thoughtcrime.securesms.backup.v2.local.ArchiveFileSystem
 import org.thoughtcrime.securesms.conversation.v2.registerForLifecycle
 import org.thoughtcrime.securesms.jobs.RestoreLocalAttachmentJob
+import org.thoughtcrime.securesms.keyvalue.SignalStore
 import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.registration.ui.shared.RegistrationScreen
 import java.io.File
@@ -73,6 +74,8 @@ class QuickstartRestoreActivity : BaseActivity() {
   }
 
   private var restoreStatus by mutableStateOf("Restoring data...")
+
+  private val eventBusSubscriber = EventBusSubscriber()
 
   private val manageStorageLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
     if (hasStorageAccess()) {
@@ -109,7 +112,7 @@ class QuickstartRestoreActivity : BaseActivity() {
       }
     }
 
-    org.greenrobot.eventbus.EventBus.getDefault().registerForLifecycle(subscriber = this, lifecycleOwner = this)
+    org.greenrobot.eventbus.EventBus.getDefault().registerForLifecycle(subscriber = eventBusSubscriber, lifecycleOwner = this)
 
     if (hasStorageAccess()) {
       startRestore()
@@ -152,10 +155,15 @@ class QuickstartRestoreActivity : BaseActivity() {
 
         // Import directly via BackupRepository, bypassing SnapshotFileSystem/LocalArchiver
         // to avoid DocumentFile.findFile name-matching issues
+        val backupKey = SignalStore.backup.messageBackupKey
+        val backupId = backupKey.deriveBackupId(selfData.aci)
+
         val importResult = BackupRepository.importLocal(
           mainStreamFactory = { FileInputStream(mainFile) },
           mainStreamLength = mainFile.length(),
-          selfData = selfData
+          selfData = selfData,
+          backupId = backupId,
+          messageBackupKey = backupKey
         )
 
         Log.i(TAG, "Import result: $importResult")
@@ -166,9 +174,7 @@ class QuickstartRestoreActivity : BaseActivity() {
 
         withContext(Dispatchers.Main) { restoreStatus = "Restoring attachments..." }
 
-        // Enqueue attachment restore jobs via ArchiveFileSystem (which handles the files/ directory)
-        val archiveFileSystem = ArchiveFileSystem.fromFile(applicationContext, backupDir)
-        val mediaNameToFileInfo = archiveFileSystem.filesFileSystem.allFiles()
+        val mediaNameToFileInfo = ArchiveFileSystem.fromFile(this@QuickstartRestoreActivity, signalBackupsDir).filesFileSystem.allFiles()
         RestoreLocalAttachmentJob.enqueueRestoreLocalAttachmentsJobs(mediaNameToFileInfo)
 
         QuickstartInitializer.pendingBackupDir = null
@@ -191,8 +197,10 @@ class QuickstartRestoreActivity : BaseActivity() {
     }
   }
 
-  @Subscribe(threadMode = ThreadMode.MAIN)
-  fun onEvent(restoreEvent: RestoreV2Event) {
-    restoreStatus = "${restoreEvent.type}: ${restoreEvent.count} / ${restoreEvent.estimatedTotalCount}"
+  private inner class EventBusSubscriber {
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onEvent(restoreEvent: RestoreV2Event) {
+      restoreStatus = "${restoreEvent.type}: ${restoreEvent.count} / ${restoreEvent.estimatedTotalCount}"
+    }
   }
 }

@@ -47,6 +47,7 @@ import com.bumptech.glide.RequestManager;
 import com.bumptech.glide.load.resource.bitmap.CenterCrop;
 import com.makeramen.roundedimageview.RoundedDrawable;
 
+import org.signal.core.util.ContextUtil;
 import org.signal.core.util.DimensionUnit;
 import org.signal.core.util.StringUtil;
 import org.signal.core.util.logging.Log;
@@ -69,17 +70,15 @@ import org.thoughtcrime.securesms.database.MessageTypes;
 import org.thoughtcrime.securesms.database.ThreadTable;
 import org.thoughtcrime.securesms.database.model.LiveUpdateMessage;
 import org.thoughtcrime.securesms.database.model.MessageRecord;
-import org.thoughtcrime.securesms.database.model.ThreadRecord;
+import org.thoughtcrime.securesms.database.model.ThreadWithRecipient;
 import org.thoughtcrime.securesms.database.model.UpdateDescription;
 import org.thoughtcrime.securesms.fonts.SignalSymbols.Glyph;
-import org.thoughtcrime.securesms.keyvalue.SignalStore;
 import org.thoughtcrime.securesms.glide.targets.GlideLiveDataTarget;
 import org.signal.glide.decryptableuri.DecryptableUri;
 import org.thoughtcrime.securesms.recipients.LiveRecipient;
 import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.recipients.RecipientId;
 import org.thoughtcrime.securesms.search.MessageResult;
-import org.thoughtcrime.securesms.util.ContextUtil;
 import org.thoughtcrime.securesms.util.DateUtils;
 import org.thoughtcrime.securesms.util.ExpirationUtil;
 import org.thoughtcrime.securesms.util.MediaUtil;
@@ -127,7 +126,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
   private AlertView           alertView;
   private TextView            unreadIndicator;
   private long                lastSeen;
-  private ThreadRecord        thread;
+  private ThreadWithRecipient thread;
   private boolean             batchMode;
   private Locale              locale;
   private String              highlightSubstring;
@@ -212,7 +211,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
 
   @Override
   public void bind(@NonNull LifecycleOwner lifecycleOwner,
-                   @NonNull ThreadRecord thread,
+                   @NonNull ThreadWithRecipient thread,
                    @NonNull RequestManager glideRequests,
                    @NonNull Locale locale,
                    @NonNull Set<Long> typingThreads,
@@ -223,7 +222,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
   }
 
   public void bindThread(@NonNull LifecycleOwner lifecycleOwner,
-                         @NonNull ThreadRecord thread,
+                         @NonNull ThreadWithRecipient thread,
                          @NonNull RequestManager requestManager,
                          @NonNull Locale locale,
                          @NonNull Set<Long> typingThreads,
@@ -472,7 +471,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
     return threadId;
   }
 
-  public @NonNull ThreadRecord getThread() {
+  public @NonNull ThreadWithRecipient getThread() {
     return thread;
   }
 
@@ -521,7 +520,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
     }
   }
 
-  private void setStatusIcons(ThreadRecord thread) {
+  private void setStatusIcons(ThreadWithRecipient thread) {
     if (MessageTypes.isBadDecryptType(thread.getType())) {
       deliveryStatusIndicator.setNone();
       alertView.setFailed();
@@ -561,7 +560,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
     }
   }
 
-  private void setUnreadIndicator(ThreadRecord thread) {
+  private void setUnreadIndicator(ThreadWithRecipient thread) {
     if (thread.isRead()) {
       unreadIndicator.setVisibility(View.GONE);
       unreadMentions.setVisibility(View.GONE);
@@ -616,7 +615,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
   }
 
   private static @NonNull LiveData<SpannableString> getThreadDisplayBody(@NonNull Context context,
-                                                                         @NonNull ThreadRecord thread,
+                                                                         @NonNull ThreadWithRecipient thread,
                                                                          @NonNull RequestManager requestManager,
                                                                          @Px int thumbSize,
                                                                          @NonNull GlideLiveDataTarget thumbTarget)
@@ -754,7 +753,7 @@ public final class ConversationListItem extends ConstraintLayout implements Bind
 
   private static LiveData<CharSequence> createFinalBodyWithMediaIcon(@NonNull Context context,
                                                                      @NonNull CharSequence body,
-                                                                     @NonNull ThreadRecord thread,
+                                                                     @NonNull ThreadWithRecipient thread,
                                                                      @NonNull RequestManager requestManager,
                                                                      @Px int thumbSize,
                                                                      @NonNull GlideLiveDataTarget thumbTarget)

@@ -3,7 +3,7 @@ package org.thoughtcrime.securesms.jobs;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import com.annimon.stream.Stream;
+import java.util.stream.Collectors;
 
 import org.signal.core.util.logging.Log;
 import org.thoughtcrime.securesms.database.GroupTable;
@@ -109,6 +109,11 @@ public class TypingSendJob extends BaseJob {
       return;
     }
 
+    if (recipient.isPushV2Group() && !SignalDatabase.groups().isActive(recipient.requireGroupId())) {
+      Log.w(TAG, "Not sending typing indicators to terminated or inactive groups.");
+      return;
+    }
+
     if (!recipient.isRegistered()) {
       Log.w(TAG, "Not sending typing indicators to non-Signal recipients.");
       return;
@@ -122,9 +127,8 @@ public class TypingSendJob extends BaseJob {
       groupId    = Optional.of(recipient.requireGroupId().getDecodedId());
     }
 
-    recipients = RecipientUtil.getEligibleForSending(Stream.of(recipients)
-                                                           .map(Recipient::resolve)
-                                                           .toList());
+    recipients = RecipientUtil.getEligibleForSending(recipients.stream()
+                                                               .map(Recipient::resolve).collect(Collectors.toList()));
 
     SignalServiceTypingMessage typingMessage = new SignalServiceTypingMessage(typing ? Action.STARTED : Action.STOPPED, System.currentTimeMillis(), groupId);
 

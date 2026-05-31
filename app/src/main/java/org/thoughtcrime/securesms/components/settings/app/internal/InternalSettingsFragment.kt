@@ -4,15 +4,20 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.DialogInterface
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
 import android.widget.Toast
 import androidx.fragment.app.setFragmentResultListener
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.signal.core.ui.BottomSheetUtil
 import org.signal.core.ui.permissions.PermissionDeniedBottomSheet
 import org.signal.core.ui.permissions.RationaleDialog
@@ -49,6 +54,7 @@ import org.thoughtcrime.securesms.database.model.InAppPaymentSubscriberRecord
 import org.thoughtcrime.securesms.database.model.MessageRecord
 import org.thoughtcrime.securesms.dependencies.AppDependencies
 import org.thoughtcrime.securesms.jobmanager.JobTracker
+import org.thoughtcrime.securesms.jobs.BackfillCollapsedMessageJob
 import org.thoughtcrime.securesms.jobs.CheckKeyTransparencyJob
 import org.thoughtcrime.securesms.jobs.DownloadLatestEmojiDataJob
 import org.thoughtcrime.securesms.jobs.EmojiSearchIndexDownloadJob
@@ -77,7 +83,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
 class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__internal_preferences) {
 
@@ -206,9 +211,18 @@ class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__inter
 
       switchPref(
         title = DSLSettingsText.from("Force split pane UI on phones."),
+        isEnabled = !state.forceSinglePane,
         isChecked = state.forceSplitPane,
         onClick = {
           viewModel.setForceSplitPane(!state.forceSplitPane)
+        }
+      )
+
+      switchPref(
+        title = DSLSettingsText.from("Force single-pane on newer devices."),
+        isChecked = state.forceSinglePane,
+        onClick = {
+          viewModel.setForceSinglePane(!state.forceSinglePane)
         }
       )
 
@@ -229,6 +243,17 @@ class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__inter
           RationaleDialog.createFor(requireContext(), "Title", "Details", R.drawable.symbol_key_24).show()
         }
       )
+
+      clickPref(
+        title = DSLSettingsText.from("Collapse chat updates"),
+        summary = DSLSettingsText.from("Collapses certain consecutive chat updates - cannot be undone."),
+        onClick = {
+          SignalStore.misc.completedCollapsedEventsMigration = false
+          AppDependencies.jobManager.add(BackfillCollapsedMessageJob())
+        }
+      )
+
+      dividerPref()
 
       sectionHeaderPref(DSLSettingsText.from("Playgrounds"))
 
@@ -358,6 +383,14 @@ class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__inter
         }
       )
 
+      switchPref(
+        title = DSLSettingsText.from("Enable ANR-induced crashing"),
+        isChecked = SignalStore.internal.anrDetectionCrashes,
+        onClick = {
+          SignalStore.internal.anrDetectionCrashes = !SignalStore.internal.anrDetectionCrashes
+        }
+      )
+
       dividerPref()
 
       sectionHeaderPref(DSLSettingsText.from("Logging"))
@@ -476,25 +509,6 @@ class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__inter
       dividerPref()
 
       sectionHeaderPref(DSLSettingsText.from("Network"))
-
-      switchPref(
-        title = DSLSettingsText.from("Force websocket mode"),
-        summary = DSLSettingsText.from("Pretend you have no Play Services. Ignores websocket messages and keeps the websocket open in a foreground service. You have to manually force-stop the app for changes to take effect."),
-        isChecked = state.forceWebsocketMode,
-        onClick = {
-          viewModel.setForceWebsocketMode(!state.forceWebsocketMode)
-          SimpleTask.run({
-            val jobState = AppDependencies.jobManager.runSynchronously(RefreshAttributesJob(), 10.seconds.inWholeMilliseconds)
-            return@run jobState.isPresent && jobState.get().isComplete
-          }, { success ->
-            if (success) {
-              Toast.makeText(context, "Successfully refreshed attributes. Force-stop the app for changes to take effect.", Toast.LENGTH_SHORT).show()
-            } else {
-              Toast.makeText(context, "Failed to refresh attributes.", Toast.LENGTH_SHORT).show()
-            }
-          })
-        }
-      )
 
       switchPref(
         title = DSLSettingsText.from("Allow censorship circumvention toggle"),
@@ -1063,15 +1077,26 @@ class InternalSettingsFragment : DSLSettingsFragment(R.string.preferences__inter
   }
 
   private fun refreshRemoteValues() {
-    Toast.makeText(context, "Running remote config refresh, app will restart after completion.", Toast.LENGTH_LONG).show()
-    SignalExecutors.BOUNDED.execute {
+    val starterToast = Toast.makeText(context, "Running remote config refresh, app will restart after completion.", Toast.LENGTH_LONG).apply { show() }
+    lifecycleScope.launch(Dispatchers.IO) {
       SignalStore.remoteConfig.eTag = ""
       val result: Optional<JobTracker.JobState> = AppDependencies.jobManager.runSynchronously(RemoteConfigRefreshJob(), TimeUnit.SECONDS.toMillis(10))
 
-      if (result.isPresent && result.get() == JobTracker.JobState.SUCCESS) {
-        AppUtil.restart(requireContext())
-      } else {
-        Toast.makeText(context, "Failed to refresh config remote config.", Toast.LENGTH_SHORT).show()
+      withContext(Dispatchers.Main) {
+        starterToast.cancel()
+        if (result.isPresent && result.get() == JobTracker.JobState.SUCCESS) {
+          val toast = Toast.makeText(context, "Refresh successful. Restarting...", Toast.LENGTH_SHORT)
+          if (Build.VERSION.SDK_INT >= 30) {
+            toast.addCallback(object : Toast.Callback() {
+              override fun onToastHidden() {
+                AppUtil.restart(requireContext())
+              }
+            })
+          }
+          toast.show()
+        } else {
+          Toast.makeText(context, "Failed to refresh config remote config.", Toast.LENGTH_SHORT).show()
+        }
       }
     }
   }

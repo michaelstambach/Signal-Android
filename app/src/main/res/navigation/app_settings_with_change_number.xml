@@ -786,6 +786,7 @@
             android:name="forQuickRestore"
             android:defaultValue="false"
             app:argType="boolean" />
+
     </action>
 
     <action
@@ -816,11 +817,37 @@
         app:popEnterAnim="@anim/fragment_close_enter"
         app:popExitAnim="@anim/fragment_close_exit"
         app:popUpTo="@id/app_settings"
+        app:popUpToInclusive="true">
+
+        <argument
+            android:name="launchCheckoutFlow"
+            android:defaultValue="false"
+            app:argType="boolean" />
+    </action>
+
+    <action
+        android:id="@+id/action_direct_to_chatsSettingsFragment"
+        app:destination="@id/chatsSettingsFragment"
+        app:enterAnim="@anim/fragment_open_enter"
+        app:exitAnim="@anim/fragment_open_exit"
+        app:popEnterAnim="@anim/fragment_close_enter"
+        app:popExitAnim="@anim/fragment_close_exit"
+        app:popUpTo="@id/app_settings"
         app:popUpToInclusive="true" />
 
     <action
         android:id="@+id/action_direct_to_inviteFragment"
         app:destination="@id/inviteFragment"
+        app:enterAnim="@anim/fragment_open_enter"
+        app:exitAnim="@anim/fragment_open_exit"
+        app:popEnterAnim="@anim/fragment_close_enter"
+        app:popExitAnim="@anim/fragment_close_exit"
+        app:popUpTo="@id/app_settings"
+        app:popUpToInclusive="true" />
+
+    <action
+        android:id="@+id/action_direct_to_accountSettingsFragment"
+        app:destination="@id/accountSettingsFragment"
         app:enterAnim="@anim/fragment_open_enter"
         app:exitAnim="@anim/fragment_open_exit"
         app:popEnterAnim="@anim/fragment_close_enter"
@@ -1224,6 +1251,11 @@
             app:popEnterAnim="@anim/fragment_close_enter"
             app:popExitAnim="@anim/fragment_close_exit" />
 
+        <argument
+            android:name="launchCheckoutFlow"
+            android:defaultValue="false"
+            app:argType="boolean" />
+
     </fragment>
 
     <fragment
@@ -1247,6 +1279,7 @@
             android:name="forQuickRestore"
             app:argType="boolean"
             android:defaultValue="false" />
+
     </fragment>
 
     <fragment

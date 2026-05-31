@@ -16,6 +16,7 @@ import org.signal.libsignal.usernames.BaseUsernameException
 import org.signal.libsignal.usernames.Username
 import org.signal.libsignal.usernames.UsernameLinkInvalidEntropyDataLength
 import org.signal.libsignal.usernames.UsernameLinkInvalidLinkData
+import org.signal.network.NetworkResult
 import org.thoughtcrime.securesms.components.settings.app.usernamelinks.main.UsernameLinkResetResult
 import org.thoughtcrime.securesms.database.SignalDatabase
 import org.thoughtcrime.securesms.dependencies.AppDependencies
@@ -26,7 +27,6 @@ import org.thoughtcrime.securesms.recipients.Recipient
 import org.thoughtcrime.securesms.storage.StorageSyncHelper
 import org.thoughtcrime.securesms.util.NetworkUtil
 import org.thoughtcrime.securesms.util.UsernameUtil
-import org.whispersystems.signalservice.api.NetworkResult
 import org.whispersystems.signalservice.api.SignalServiceAccountManager
 import org.whispersystems.signalservice.api.push.UsernameLinkComponents
 import org.whispersystems.signalservice.api.util.Usernames
@@ -442,6 +442,7 @@ object UsernameRepository {
         SignalDatabase.recipients.setUsername(Recipient.self().id, updatedUsername.username)
         SignalStore.account.usernameSyncState = AccountValues.UsernameSyncState.IN_SYNC
         SignalStore.account.usernameSyncErrorCount = 0
+        SignalStore.misc.needsUsernameRestore = false
 
         SignalDatabase.recipients.markNeedsSync(Recipient.self().id)
         StorageSyncHelper.scheduleSyncForDataChange()
@@ -474,6 +475,7 @@ object UsernameRepository {
         SignalDatabase.recipients.setUsername(Recipient.self().id, username.username)
         SignalStore.account.usernameSyncState = AccountValues.UsernameSyncState.IN_SYNC
         SignalStore.account.usernameSyncErrorCount = 0
+        SignalStore.misc.needsUsernameRestore = false
 
         SignalDatabase.recipients.markNeedsSync(Recipient.self().id)
         StorageSyncHelper.scheduleSyncForDataChange()
@@ -531,6 +533,7 @@ object UsernameRepository {
         SignalStore.account.usernameLink = null
         SignalStore.account.usernameSyncState = AccountValues.UsernameSyncState.IN_SYNC
         SignalStore.account.usernameSyncErrorCount = 0
+        SignalStore.misc.needsUsernameRestore = false
         SignalDatabase.recipients.markNeedsSync(Recipient.self().id)
         StorageSyncHelper.scheduleSyncForDataChange()
         Log.i(TAG, "[deleteUsername] Successfully deleted the username.")

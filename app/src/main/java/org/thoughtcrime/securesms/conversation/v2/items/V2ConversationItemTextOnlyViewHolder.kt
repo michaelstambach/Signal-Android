@@ -97,7 +97,8 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
     binding.footerExpiry,
     binding.deliveryStatus,
     binding.footerBackground,
-    binding.footerPinned
+    binding.footerPinned,
+    binding.footerStarred
   )
 
   override val reactionsView: View = binding.reactions
@@ -251,7 +252,7 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
       hasProcessedSupportedPayload = true
     }
 
-    if (hasProcessedSupportedPayload) {
+    if (hasProcessedSupportedPayload && V2Payload.WALLPAPER !in payload) {
       return
     }
 
@@ -260,6 +261,8 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
     presentDeliveryStatus()
     presentFooterBackground()
     presentFooterPinned()
+    presentFooterStarred()
+    presentStarredSource()
     presentFooterExpiry()
     presentFooterEndPadding()
     presentAlert()
@@ -441,14 +444,21 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
     V2ConversationItemUtils.linkifyUrlLinks(messageBody, conversationContext.selectedItems.isEmpty(), conversationContext.clickListener::onUrlClicked)
 
     if (conversationMessage.hasStyleLinks()) {
+      val isReleaseNotes = conversationMessage.threadRecipient.isReleaseNotes
+      val linkColor = if (isReleaseNotes) {
+        themeDelegate.getBodyTextColor(conversationMessage)
+      } else {
+        ContextCompat.getColor(getContext(), R.color.signal_accent_primary)
+      }
+      val underline = isReleaseNotes
       messageBody.getSpans(0, messageBody.length, PlaceholderURLSpan::class.java).forEach { placeholder ->
         val start = messageBody.getSpanStart(placeholder)
         val end = messageBody.getSpanEnd(placeholder)
         val span: URLSpan = InterceptableLongClickCopyLinkSpan(
           placeholder.value,
           conversationContext.clickListener::onUrlClicked,
-          ContextCompat.getColor(getContext(), R.color.signal_accent_primary),
-          false
+          linkColor,
+          underline
         )
 
         messageBody.setSpan(span, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -541,6 +551,27 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
     pinned.visible = conversationMessage.messageRecord.pinnedUntil > 0
   }
 
+  private fun presentFooterStarred() {
+    val starred = binding.footerStarred
+    starred.setColorFilter(themeDelegate.getFooterForegroundColor(conversationMessage), PorterDuff.Mode.SRC_IN)
+    starred.visible = conversationMessage.messageRecord.isStarred
+  }
+
+  private fun presentStarredSource() {
+    val wrapper = binding.starredSourceWrapper ?: return
+    val sourceView = binding.starredSource ?: return
+
+    if (conversationContext.displayMode is ConversationItemDisplayMode.Starred) {
+      val senderName = conversationMessage.messageRecord.fromRecipient.getShortDisplayName(context)
+      val chatName = conversationMessage.threadRecipient.getShortDisplayName(context)
+      sourceView.text = context.getString(R.string.StarredMessages__s_chevron_s, senderName, chatName)
+      wrapper.visible = true
+      binding.starredSourceAvatar?.setAvatar(conversationContext.requestManager, conversationMessage.messageRecord.fromRecipient, false)
+    } else {
+      wrapper.visible = false
+    }
+  }
+
   private fun presentFooterEndPadding() {
     binding.footerSpace?.visibility = if (isForcedFooter() || shape.isEndingShape) {
       View.INVISIBLE
@@ -550,7 +581,8 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
   }
 
   private fun presentSender() {
-    if (conversationMessage.threadRecipient.isGroup) {
+    val isStarredMode = conversationContext.displayMode is ConversationItemDisplayMode.Starred
+    if (conversationMessage.threadRecipient.isGroup && !isStarredMode) {
       presentSenderPhoto()
       presentSenderBadge()
       presentSenderNameWithLabel()
@@ -606,8 +638,7 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
     val tintColor = conversationContext.getColorizer().getIncomingGroupSenderColor(context, sender)
 
     nameWithLabelView.apply {
-      setSender(sender.getDisplayName(context), tintColor)
-      setLabel(conversationMessage.memberLabel)
+      bind(sender.getDisplayName(context), tintColor, conversationMessage.memberLabel)
       visible = true
     }
 
@@ -841,7 +872,7 @@ open class V2ConversationItemTextOnlyViewHolder<Model : MappingModel<Model>>(
   }
 
   private fun isForcedFooter(): Boolean {
-    return conversationMessage.messageRecord.isEditMessage || conversationMessage.messageRecord.expiresIn > 0L || conversationMessage.messageRecord.pinnedUntil > 0
+    return conversationMessage.messageRecord.isEditMessage || conversationMessage.messageRecord.expiresIn > 0L || conversationMessage.messageRecord.pinnedUntil > 0 || conversationMessage.messageRecord.isStarred
   }
 
   private inner class ReactionMeasureListener : V2ConversationItemLayout.OnMeasureListener {

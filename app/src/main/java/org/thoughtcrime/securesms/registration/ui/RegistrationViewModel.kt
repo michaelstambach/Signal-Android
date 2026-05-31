@@ -35,6 +35,7 @@ import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.ecc.ECPrivateKey
 import org.signal.libsignal.zkgroup.profiles.ProfileKey
+import org.signal.network.NetworkResult
 import org.signal.registration.proto.RegistrationProvisionMessage
 import org.thoughtcrime.securesms.backup.v2.BackupRepository
 import org.thoughtcrime.securesms.backup.v2.RestoreTimestampResult
@@ -86,7 +87,6 @@ import org.thoughtcrime.securesms.registration.viewmodel.SvrAuthCredentialSet
 import org.thoughtcrime.securesms.util.RemoteConfig
 import org.thoughtcrime.securesms.util.TextSecurePreferences
 import org.thoughtcrime.securesms.util.dualsim.MccMncProducer
-import org.whispersystems.signalservice.api.NetworkResult
 import org.whispersystems.signalservice.api.SvrNoDataException
 import org.whispersystems.signalservice.api.messages.multidevice.RequestMessage
 import org.whispersystems.signalservice.api.messages.multidevice.SignalServiceSyncMessage
@@ -499,7 +499,14 @@ class RegistrationViewModel : ViewModel() {
       Log.d(TAG, "Requesting push challenge token…")
       val pushSubmissionResult = RegistrationRepository.requestAndVerifyPushToken(context, session.sessionId, e164, password)
       Log.d(TAG, "Push challenge token submitted.", true)
-      handleSessionStateResult(context, pushSubmissionResult)
+      val success = handleSessionStateResult(context, pushSubmissionResult)
+
+      if (!success) {
+        Log.i(TAG, "Push challenge was not successful, removing from challenge list to allow fallback.")
+        store.update {
+          it.copy(challengesRequested = it.challengesRequested.minus(Challenge.PUSH), inProgress = false)
+        }
+      }
     }
   }
 
@@ -647,6 +654,11 @@ class RegistrationViewModel : ViewModel() {
     store.update {
       it.copy(inProgress = false, networkError = cause)
     }
+  }
+
+  /** Clears the recovery password from state, e.g. when a backup-key-based registration attempt fails and the stale password must not be retried. */
+  fun clearRecoveryPassword() {
+    setRecoveryPassword(null)
   }
 
   private fun setRecoveryPassword(recoveryPassword: String?) {
@@ -798,7 +810,7 @@ class RegistrationViewModel : ViewModel() {
         registrationCheckpoint = RegistrationCheckpoint.PIN_ENTERED
       )
     }
-    viewModelScope.launch {
+    viewModelScope.launch(context = coroutineExceptionHandler) {
       verifyCodeInternal(
         context = context,
         registrationLocked = true,
@@ -930,7 +942,7 @@ class RegistrationViewModel : ViewModel() {
       Log.w(TAG, "Unable to start auth websocket", e)
     }
 
-    if (!remoteResult.reRegistration && SignalStore.registration.restoreDecisionState.isDecisionPending) {
+    if (!remoteResult.reRegistration && SignalStore.registration.restoreDecisionState.isDecisionPending && SignalStore.backup.localRestoreAccountEntropyPool == null) {
       Log.v(TAG, "Not re-registration, and still pending restore decision, likely an account with no data to restore, skipping post register restore")
       SignalStore.registration.restoreDecisionState = RestoreDecisionState.NewAccount
     }

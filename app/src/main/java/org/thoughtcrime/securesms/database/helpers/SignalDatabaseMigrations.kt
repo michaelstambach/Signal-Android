@@ -161,7 +161,16 @@ import org.thoughtcrime.securesms.database.helpers.migration.V304_CallAndReplyNo
 import org.thoughtcrime.securesms.database.helpers.migration.V305_AddStoryArchivedColumn
 import org.thoughtcrime.securesms.database.helpers.migration.V306_AddRemoteDeletedColumn
 import org.thoughtcrime.securesms.database.helpers.migration.V308_AddBackRemoteDeletedColumn
-import org.thoughtcrime.securesms.database.helpers.migration.V309_ThreadUnreadReactionToSelfCount
+import org.thoughtcrime.securesms.database.helpers.migration.V309_GroupTerminatedColumnMigration
+import org.thoughtcrime.securesms.database.helpers.migration.V310_AddStarredColumn
+import org.thoughtcrime.securesms.database.helpers.migration.V311_AddAttachmentMediaOverviewSizeIndex
+import org.thoughtcrime.securesms.database.helpers.migration.V312_RefactorNameCollisionTables
+import org.thoughtcrime.securesms.database.helpers.migration.V313_AddCollapsingUpdateColumns
+import org.thoughtcrime.securesms.database.helpers.migration.V314_FixMessageRequestAcceptedToRecipient
+import org.thoughtcrime.securesms.database.helpers.migration.V315_CleanupE164SenderKeyShared
+import org.thoughtcrime.securesms.database.helpers.migration.V316_AddVerifiedGroupNameHashMigration
+import org.thoughtcrime.securesms.database.helpers.migration.V317_AddMessageThreadDateReceivedUnreadIndex
+import org.thoughtcrime.securesms.database.helpers.migration.V318_ThreadUnreadReactionToSelfCount
 import org.thoughtcrime.securesms.database.SQLiteDatabase as SignalSqliteDatabase
 
 /**
@@ -331,10 +340,19 @@ object SignalDatabaseMigrations {
     306 to V306_AddRemoteDeletedColumn,
 //    307 to V307_RemoveRemoteDeletedColumn - Removed due to unsolvable OOM crashes. [TODO]: Attempt to fix in the future
     308 to V308_AddBackRemoteDeletedColumn,
-    309 to V309_ThreadUnreadReactionToSelfCount
+    309 to V309_GroupTerminatedColumnMigration,
+    310 to V310_AddStarredColumn,
+    311 to V311_AddAttachmentMediaOverviewSizeIndex,
+    312 to V312_RefactorNameCollisionTables,
+    313 to V313_AddCollapsingUpdateColumns,
+    314 to V314_FixMessageRequestAcceptedToRecipient,
+    315 to V315_CleanupE164SenderKeyShared,
+    316 to V316_AddVerifiedGroupNameHashMigration,
+    317 to V317_AddMessageThreadDateReceivedUnreadIndex,
+    318 to V318_ThreadUnreadReactionToSelfCount
   )
 
-  const val DATABASE_VERSION = 309
+  const val DATABASE_VERSION = 318
 
   @JvmStatic
   fun migrate(context: Application, db: SignalSqliteDatabase, oldVersion: Int, newVersion: Int) {
@@ -384,8 +402,5 @@ object SignalDatabaseMigrations {
 
   @JvmStatic
   fun migratePostTransaction(context: Context, oldVersion: Int) {
-    if (oldVersion < V149_LegacyMigrations.MIGRATE_PREKEYS_VERSION) {
-      PreKeyMigrationHelper.cleanUpPreKeys(context)
-    }
   }
 }

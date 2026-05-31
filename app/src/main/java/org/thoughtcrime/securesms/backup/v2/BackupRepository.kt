@@ -18,9 +18,19 @@ import kotlinx.coroutines.withContext
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import org.greenrobot.eventbus.EventBus
+import org.signal.archive.proto.BackupDebugInfo
+import org.signal.archive.proto.BackupInfo
+import org.signal.archive.proto.Frame
+import org.signal.archive.stream.BackupExportWriter
+import org.signal.archive.stream.BackupImportReader
+import org.signal.archive.stream.EncryptedBackupReader
+import org.signal.archive.stream.EncryptedBackupWriter
+import org.signal.archive.stream.PlainTextBackupReader
+import org.signal.archive.stream.PlainTextBackupWriter
 import org.signal.core.models.AccountEntropyPool
 import org.signal.core.models.ServiceId.ACI
 import org.signal.core.models.ServiceId.PNI
+import org.signal.core.models.backup.BackupId
 import org.signal.core.models.backup.MediaName
 import org.signal.core.models.backup.MediaRootBackupKey
 import org.signal.core.models.backup.MessageBackupKey
@@ -30,6 +40,7 @@ import org.signal.core.util.CursorUtil
 import org.signal.core.util.DiskUtil
 import org.signal.core.util.EventTimer
 import org.signal.core.util.PendingIntentFlags.cancelCurrent
+import org.signal.core.util.ServiceUtil
 import org.signal.core.util.Stopwatch
 import org.signal.core.util.bytes
 import org.signal.core.util.concurrent.LimitedWorker
@@ -56,14 +67,18 @@ import org.signal.libsignal.messagebackup.BackupForwardSecrecyToken
 import org.signal.libsignal.zkgroup.VerificationFailedException
 import org.signal.libsignal.zkgroup.backups.BackupLevel
 import org.signal.libsignal.zkgroup.profiles.ProfileKey
+import org.signal.network.ApplicationErrorAction
+import org.signal.network.NetworkResult
+import org.signal.network.StatusCodeErrorAction
+import org.signal.network.api.SvrBApi
+import org.signal.network.exceptions.NonSuccessfulResponseCodeException
+import org.signal.network.rest.toNetworkResult
 import org.thoughtcrime.securesms.R
-import org.thoughtcrime.securesms.attachments.Attachment
 import org.thoughtcrime.securesms.attachments.AttachmentId
 import org.thoughtcrime.securesms.attachments.Cdn
 import org.thoughtcrime.securesms.attachments.DatabaseAttachment
 import org.thoughtcrime.securesms.backup.ArchiveUploadProgress
 import org.thoughtcrime.securesms.backup.DeletionState
-import org.thoughtcrime.securesms.backup.isIdle
 import org.thoughtcrime.securesms.backup.v2.BackupRepository.copyAttachmentToArchive
 import org.thoughtcrime.securesms.backup.v2.BackupRepository.exportForDebugging
 import org.thoughtcrime.securesms.backup.v2.importer.ChatItemArchiveImporter
@@ -75,15 +90,6 @@ import org.thoughtcrime.securesms.backup.v2.processor.ChatItemArchiveProcessor
 import org.thoughtcrime.securesms.backup.v2.processor.NotificationProfileArchiveProcessor
 import org.thoughtcrime.securesms.backup.v2.processor.RecipientArchiveProcessor
 import org.thoughtcrime.securesms.backup.v2.processor.StickerArchiveProcessor
-import org.thoughtcrime.securesms.backup.v2.proto.BackupDebugInfo
-import org.thoughtcrime.securesms.backup.v2.proto.BackupInfo
-import org.thoughtcrime.securesms.backup.v2.proto.Frame
-import org.thoughtcrime.securesms.backup.v2.stream.BackupExportWriter
-import org.thoughtcrime.securesms.backup.v2.stream.BackupImportReader
-import org.thoughtcrime.securesms.backup.v2.stream.EncryptedBackupReader
-import org.thoughtcrime.securesms.backup.v2.stream.EncryptedBackupWriter
-import org.thoughtcrime.securesms.backup.v2.stream.PlainTextBackupReader
-import org.thoughtcrime.securesms.backup.v2.stream.PlainTextBackupWriter
 import org.thoughtcrime.securesms.backup.v2.ui.BackupAlert
 import org.thoughtcrime.securesms.backup.v2.ui.subscription.MessageBackupsType
 import org.thoughtcrime.securesms.components.settings.app.AppSettingsActivity
@@ -109,12 +115,12 @@ import org.thoughtcrime.securesms.jobs.ArchiveAttachmentBackfillJob
 import org.thoughtcrime.securesms.jobs.ArchiveThumbnailBackfillJob
 import org.thoughtcrime.securesms.jobs.ArchiveThumbnailUploadJob
 import org.thoughtcrime.securesms.jobs.AvatarGroupsV2DownloadJob
+import org.thoughtcrime.securesms.jobs.BackfillCollapsedMessageJob
 import org.thoughtcrime.securesms.jobs.BackupDeleteJob
 import org.thoughtcrime.securesms.jobs.BackupMessagesJob
 import org.thoughtcrime.securesms.jobs.BackupRestoreMediaJob
 import org.thoughtcrime.securesms.jobs.CancelRestoreMediaJob
 import org.thoughtcrime.securesms.jobs.CreateReleaseChannelJob
-import org.thoughtcrime.securesms.jobs.LocalArchiveJob
 import org.thoughtcrime.securesms.jobs.LocalBackupJob
 import org.thoughtcrime.securesms.jobs.MultiDeviceKeysUpdateJob
 import org.thoughtcrime.securesms.jobs.RequestGroupV2InfoJob
@@ -131,7 +137,6 @@ import org.thoughtcrime.securesms.keyvalue.KeyValueStore
 import org.thoughtcrime.securesms.keyvalue.SignalStore
 import org.thoughtcrime.securesms.keyvalue.isDecisionPending
 import org.thoughtcrime.securesms.keyvalue.protos.ArchiveUploadProgressState
-import org.thoughtcrime.securesms.keyvalue.protos.LocalBackupCreationProgress
 import org.thoughtcrime.securesms.logsubmit.SubmitDebugLogRepository
 import org.thoughtcrime.securesms.net.SignalNetwork
 import org.thoughtcrime.securesms.notifications.NotificationChannels
@@ -143,12 +148,8 @@ import org.thoughtcrime.securesms.service.BackupMediaRestoreService
 import org.thoughtcrime.securesms.service.BackupProgressService
 import org.thoughtcrime.securesms.storage.StorageSyncHelper
 import org.thoughtcrime.securesms.util.RemoteConfig
-import org.thoughtcrime.securesms.util.ServiceUtil
 import org.thoughtcrime.securesms.util.TextSecurePreferences
 import org.thoughtcrime.securesms.util.toMillis
-import org.whispersystems.signalservice.api.ApplicationErrorAction
-import org.whispersystems.signalservice.api.NetworkResult
-import org.whispersystems.signalservice.api.StatusCodeErrorAction
 import org.whispersystems.signalservice.api.archive.ArchiveGetMediaItemsResponse
 import org.whispersystems.signalservice.api.archive.ArchiveKeyRotationLimitResponse
 import org.whispersystems.signalservice.api.archive.ArchiveMediaRequest
@@ -162,8 +163,6 @@ import org.whispersystems.signalservice.api.crypto.AttachmentCipherStreamUtil
 import org.whispersystems.signalservice.api.link.TransferArchiveResponse
 import org.whispersystems.signalservice.api.messages.AttachmentTransferProgress
 import org.whispersystems.signalservice.api.messages.SignalServiceAttachment.ProgressListener
-import org.whispersystems.signalservice.api.push.exceptions.NonSuccessfulResponseCodeException
-import org.whispersystems.signalservice.api.svr.SvrBApi
 import org.whispersystems.signalservice.internal.crypto.PaddingInputStream
 import org.whispersystems.signalservice.internal.push.AttachmentUploadForm
 import org.whispersystems.signalservice.internal.push.AuthCredentials
@@ -426,6 +425,12 @@ object BackupRepository {
   }
 
   fun markOutOfRemoteStorageSpaceError() {
+    if (SignalStore.backup.isNotEnoughRemoteStorageSpace) {
+      return
+    }
+
+    SignalStore.backup.markNotEnoughRemoteStorageSpace()
+
     val context = AppDependencies.application
 
     val pendingIntent = PendingIntent.getActivity(context, 0, AppSettingsActivity.remoteBackups(context), cancelCurrent())
@@ -438,8 +443,6 @@ object BackupRepository {
       .build()
 
     ServiceUtil.getNotificationManager(context).notify(NotificationIds.OUT_OF_REMOTE_STORAGE, notification)
-
-    SignalStore.backup.markNotEnoughRemoteStorageSpace()
   }
 
   fun clearOutOfRemoteStorageSpaceError() {
@@ -589,14 +592,6 @@ object BackupRepository {
 
   fun snoozeDownloadYourBackupData() {
     SignalStore.backup.snoozeDownloadNotifier()
-  }
-
-  @JvmStatic
-  fun maybeFixAnyDanglingLocalExportProgress() {
-    if (!SignalStore.backup.newLocalBackupProgress.isIdle && AppDependencies.jobManager.find { it.factoryKey == LocalArchiveJob.KEY }.isEmpty()) {
-      Log.w(TAG, "Found stale local backup progress with no active job. Resetting to idle.")
-      SignalStore.backup.newLocalBackupProgress = LocalBackupCreationProgress(idle = LocalBackupCreationProgress.Idle())
-    }
   }
 
   @JvmStatic
@@ -810,6 +805,34 @@ object BackupRepository {
         localBackupProgressEmitter.onAttachment(currentProgress, localArchivableAttachments.size.toLong())
       }
     }
+  }
+
+  @WorkerThread
+  fun exportForLocalPlaintextArchive(
+    outputStream: OutputStream,
+    progressEmitter: ExportProgressListener?,
+    cancellationSignal: () -> Boolean,
+    includeMedia: Boolean
+  ): List<AttachmentTable.LocalArchivableAttachment> {
+    val writer = LibSignalJsonBackupWriter(NonClosingOutputStream(outputStream))
+    val collectedAttachments = mutableListOf<AttachmentTable.LocalArchivableAttachment>()
+
+    export(
+      currentTime = System.currentTimeMillis(),
+      isLocal = true,
+      writer = writer,
+      backupMode = BackupMode.PLAINTEXT_EXPORT,
+      progressEmitter = progressEmitter,
+      cancellationSignal = cancellationSignal,
+      extraFrameOperation = null,
+      messageInclusionCutoffTime = 0
+    ) { dbSnapshot ->
+      if (includeMedia) {
+        collectedAttachments.addAll(dbSnapshot.attachmentTable.getLocalArchivableAttachmentsForPlaintextExport())
+      }
+    }
+
+    return collectedAttachments
   }
 
   /**
@@ -1088,13 +1111,13 @@ object BackupRepository {
   /**
    * Imports a local backup file that was exported to disk.
    */
-  fun importLocal(mainStreamFactory: () -> InputStream, mainStreamLength: Long, selfData: SelfData): ImportResult {
-    val backupKey = SignalStore.backup.messageBackupKey
+  fun importLocal(mainStreamFactory: () -> InputStream, mainStreamLength: Long, selfData: SelfData, backupId: BackupId, messageBackupKey: MessageBackupKey): ImportResult {
+    val backupKey = messageBackupKey
 
     val frameReader = try {
       EncryptedBackupReader.createForLocalOrLinking(
         key = backupKey,
-        aci = selfData.aci,
+        backupId = backupId,
         length = mainStreamLength,
         dataStream = mainStreamFactory
       )
@@ -1310,51 +1333,59 @@ object BackupRepository {
       val totalLength = frameReader.getStreamLength()
       var frameCount = 0
       for (frame in frameReader) {
+        val frameAccount = frame.account
+        val frameRecipient = frame.recipient
+        val frameChat = frame.chat
+        val frameAdHocCall = frame.adHocCall
+        val frameStickerPack = frame.stickerPack
+        val frameNotificationProfile = frame.notificationProfile
+        val frameChatFolder = frame.chatFolder
+        val frameChatItem = frame.chatItem
         when {
-          frame.account != null -> {
-            AccountDataArchiveProcessor.import(frame.account, selfId, importState)
+          frameAccount != null -> {
+            AccountDataArchiveProcessor.import(frameAccount, selfId, importState)
             eventTimer.emit("account")
             frameCount++
           }
 
-          frame.recipient != null -> {
-            RecipientArchiveProcessor.import(frame.recipient, importState)
+          frameRecipient != null -> {
+            RecipientArchiveProcessor.import(frameRecipient, importState)
             eventTimer.emit("recipient")
             frameCount++
           }
 
-          frame.chat != null -> {
-            ChatArchiveProcessor.import(frame.chat, importState)
+          frameChat != null -> {
+            ChatArchiveProcessor.import(frameChat, importState)
             eventTimer.emit("chat")
             frameCount++
           }
 
-          frame.adHocCall != null -> {
-            AdHocCallArchiveProcessor.import(frame.adHocCall, importState)
+          frameAdHocCall != null -> {
+            AdHocCallArchiveProcessor.import(frameAdHocCall, importState)
             eventTimer.emit("call")
             frameCount++
           }
 
-          frame.stickerPack != null -> {
-            StickerArchiveProcessor.import(frame.stickerPack)
+          frameStickerPack != null -> {
+            StickerArchiveProcessor.import(frameStickerPack)
             eventTimer.emit("sticker-pack")
             frameCount++
           }
 
-          frame.notificationProfile != null -> {
-            NotificationProfileArchiveProcessor.import(frame.notificationProfile, importState)
+          frameNotificationProfile != null -> {
+            NotificationProfileArchiveProcessor.import(frameNotificationProfile, importState)
             eventTimer.emit("notification-profile")
             frameCount++
           }
 
-          frame.chatFolder != null -> {
-            ChatFolderArchiveProcessor.import(frame.chatFolder, importState)
+          frameChatFolder != null -> {
+            ChatFolderArchiveProcessor.import(frameChatFolder, importState)
             eventTimer.emit("chat-folder")
             frameCount++
           }
 
-          frame.chatItem != null -> {
-            chatItemInserter.import(frame.chatItem)
+          frameChatItem != null -> {
+            chatItemInserter.import(frameChatItem)
             eventTimer.emit("chatItem")
             frameCount++
 
@@ -1491,6 +1522,10 @@ object BackupRepository {
     AppDependencies.jobManager.addAll(groupJobs)
     stopwatch.split("group-jobs")
 
+    if (RemoteConfig.collapseEvents) {
+      AppDependencies.jobManager.add(BackfillCollapsedMessageJob())
+    }
+
     SignalStore.backup.firstAppVersion = header.firstAppVersion
     SignalStore.internal.importedBackupDebugInfo = header.debugInfo.let { BackupDebugInfo.ADAPTER.decodeOrNull(it.toByteArray()) }
 
@@ -1594,16 +1629,10 @@ object BackupRepository {
       }
   }
 
-  fun getResumableMessagesBackupUploadSpec(backupFileSize: Long): NetworkResult<ResumableMessagesBackupUploadSpec> {
+  fun getMessageBackupUploadForm(backupFileSize: Long): NetworkResult<AttachmentUploadForm> {
     return initBackupAndFetchAuth()
       .then { credential ->
         SignalNetwork.archive.getMessageBackupUploadForm(SignalStore.account.requireAci(), credential.messageBackupAccess, backupFileSize)
-          .also { Log.i(TAG, "UploadFormResult: ${it::class.simpleName}") }
-      }
-      .then { form ->
-        SignalNetwork.archive.getBackupResumableUploadUrl(form)
-          .also { Log.i(TAG, "ResumableUploadUrlResult: ${it::class.simpleName}") }
-          .map { ResumableMessagesBackupUploadSpec(attachmentUploadForm = form, resumableUri = it) }
       }
   }
 
@@ -1646,14 +1675,13 @@ object BackupRepository {
 
   /**
    * Retrieves an [AttachmentUploadForm] that can be used to upload an attachment to the transit cdn.
-   * To continue the upload, use [org.whispersystems.signalservice.api.attachment.AttachmentApi.getResumableUploadSpec].
    *
    * It's important to note that in order to get this to the archive cdn, you still need to use [copyAttachmentToArchive].
    */
-  fun getAttachmentUploadForm(): NetworkResult<AttachmentUploadForm> {
+  fun getAttachmentUploadForm(uploadLength: Long): NetworkResult<AttachmentUploadForm> {
     return initBackupAndFetchAuth()
       .then { credential ->
-        SignalNetwork.archive.getMediaUploadForm(SignalStore.account.requireAci(), credential.mediaBackupAccess)
+        SignalNetwork.archive.getMediaUploadForm(SignalStore.account.requireAci(), credential.mediaBackupAccess, uploadLength)
       }
   }
 
@@ -1684,10 +1712,10 @@ object BackupRepository {
   /**
    * Copies a thumbnail that has been uploaded to the transit cdn to the archive cdn.
    */
-  fun copyThumbnailToArchive(thumbnailAttachment: Attachment, parentAttachment: DatabaseAttachment): NetworkResult<ArchiveMediaResponse> {
+  fun copyThumbnailToArchive(thumbnail: UploadedThumbnailInfo, parentAttachment: DatabaseAttachment): NetworkResult<ArchiveMediaResponse> {
     return initBackupAndFetchAuth()
       .then { credential ->
-        val request = thumbnailAttachment.toArchiveMediaRequest(parentAttachment.requireThumbnailMediaName(), credential.mediaBackupAccess.backupKey)
+        val request = buildArchiveMediaRequest(thumbnail.cdnNumber, thumbnail.remoteLocation, thumbnail.size, parentAttachment.requireThumbnailMediaName(), credential.mediaBackupAccess.backupKey)
 
         SignalNetwork.archive.copyAttachmentToArchive(
           aci = SignalStore.account.requireAci(),
@@ -1704,7 +1732,7 @@ object BackupRepository {
     return initBackupAndFetchAuth()
       .then { credential ->
         val mediaName = attachment.requireMediaName()
-        val request = attachment.toArchiveMediaRequest(mediaName, credential.mediaBackupAccess.backupKey)
+        val request = buildArchiveMediaRequest(attachment.cdn.cdnNumber, attachment.remoteLocation!!, attachment.size, mediaName, credential.mediaBackupAccess.backupKey)
         SignalNetwork.archive
           .copyAttachmentToArchive(
             aci = SignalStore.account.requireAci(),
@@ -2054,7 +2082,7 @@ object BackupRepository {
   }
 
   /**
-   * See [org.whispersystems.signalservice.api.archive.ArchiveApi.getSvrBAuthorization].
+   * See [org.signal.network.api.ArchiveApi.getSvrBAuthorization].
    */
   fun getSvrBAuth(): NetworkResult<AuthCredentials> {
     return initBackupAndFetchAuth()
@@ -2155,15 +2183,15 @@ object BackupRepository {
     val profileKey: ProfileKey
   )
 
-  private fun Attachment.toArchiveMediaRequest(mediaName: MediaName, mediaRootBackupKey: MediaRootBackupKey): ArchiveMediaRequest {
+  private fun buildArchiveMediaRequest(cdnNumber: Int, remoteLocation: String, plaintextSize: Long, mediaName: MediaName, mediaRootBackupKey: MediaRootBackupKey): ArchiveMediaRequest {
     val mediaSecrets = mediaRootBackupKey.deriveMediaSecrets(mediaName)
 
     return ArchiveMediaRequest(
       sourceAttachment = ArchiveMediaRequest.SourceAttachment(
-        cdn = cdn.cdnNumber,
-        key = remoteLocation!!
+        cdn = cdnNumber,
+        key = remoteLocation
       ),
-      objectLength = AttachmentCipherStreamUtil.getCiphertextLength(PaddingInputStream.getPaddedSize(size)).toInt(),
+      objectLength = AttachmentCipherStreamUtil.getCiphertextLength(PaddingInputStream.getPaddedSize(plaintextSize)).toInt(),
       mediaId = mediaSecrets.id.encode(),
       hmacKey = Base64.encodeWithPadding(mediaSecrets.macKey),
       encryptionKey = Base64.encodeWithPadding(mediaSecrets.aesKey)
@@ -2522,7 +2550,8 @@ sealed interface RestoreTimestampResult {
 enum class BackupMode {
   REMOTE,
   LINK_SYNC,
-  LOCAL;
+  LOCAL,
+  PLAINTEXT_EXPORT;
 
   val isLinkAndSync: Boolean
     get() = this == LINK_SYNC
@@ -2575,3 +2604,9 @@ class ArchiveMediaItemIterator(private val cursor: Cursor) : Iterator<ArchiveMed
     )
   }
 }
+
+data class UploadedThumbnailInfo(
+  val cdnNumber: Int,
+  val remoteLocation: String,
+  val size: Long
+)

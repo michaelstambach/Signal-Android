@@ -141,12 +141,14 @@ internal fun LocalBackupsSettingsScreen(
                     color = MaterialTheme.colorScheme.onSurface
                   )
 
-                  Text(
-                    text = state.lastBackupLabel.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp)
-                  )
+                  if (state.lastBackupLabel != null) {
+                    Text(
+                      text = stringResource(R.string.BackupsSettingsFragment_last_backup_s, state.lastBackupLabel),
+                      style = MaterialTheme.typography.bodyMedium,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      modifier = Modifier.padding(top = 4.dp)
+                    )
+                  }
                 }
               },
               onClick = callback::onCreateBackupClick
@@ -231,7 +233,15 @@ internal fun LocalBackupsSettingsScreen(
   }
 
   if (state.isDeleting) {
-    Dialogs.IndeterminateProgressDialog(message = stringResource(id = R.string.BackupDialog_deleting_local_backup))
+    val message = stringResource(id = R.string.BackupDialog_deleting_local_backup)
+    if (state.deleteTotal > 0) {
+      Dialogs.DeterminateProgressDialog(
+        message = message,
+        progress = { state.deleteCompleted.toFloat() / state.deleteTotal }
+      )
+    } else {
+      Dialogs.IndeterminateProgressDialog(message = message)
+    }
   }
 }
 
@@ -270,7 +280,7 @@ private fun LocalBackupsSettingsEnabledIdlePreview() {
     LocalBackupsSettingsScreen(
       state = LocalBackupsSettingsState(
         backupsEnabled = true,
-        lastBackupLabel = "Last backup: 1 hour ago",
+        lastBackupLabel = "1 hour ago",
         folderDisplayName = "/storage/emulated/0/Signal/Backups",
         scheduleTimeLabel = "1:00 AM",
         progress = LocalBackupCreationProgress(idle = LocalBackupCreationProgress.Idle())
@@ -287,7 +297,7 @@ private fun LocalBackupsSettingsEnabledExportingIndeterminatePreview() {
     LocalBackupsSettingsScreen(
       state = LocalBackupsSettingsState(
         backupsEnabled = true,
-        lastBackupLabel = "Last backup: 1 hour ago",
+        lastBackupLabel = "1 hour ago",
         folderDisplayName = "/storage/emulated/0/Signal/Backups",
         scheduleTimeLabel = "1:00 AM",
         progress = LocalBackupCreationProgress(
@@ -306,7 +316,7 @@ private fun LocalBackupsSettingsEnabledExportingMessagesPreview() {
     LocalBackupsSettingsScreen(
       state = LocalBackupsSettingsState(
         backupsEnabled = true,
-        lastBackupLabel = "Last backup: 1 hour ago",
+        lastBackupLabel = "1 hour ago",
         folderDisplayName = "/storage/emulated/0/Signal/Backups",
         scheduleTimeLabel = "1:00 AM",
         progress = LocalBackupCreationProgress(
@@ -329,7 +339,7 @@ private fun LocalBackupsSettingsEnabledTransferringPreview() {
     LocalBackupsSettingsScreen(
       state = LocalBackupsSettingsState(
         backupsEnabled = true,
-        lastBackupLabel = "Last backup: 1 hour ago",
+        lastBackupLabel = "1 hour ago",
         folderDisplayName = "/storage/emulated/0/Signal/Backups",
         scheduleTimeLabel = "1:00 AM",
         progress = LocalBackupCreationProgress(
@@ -352,7 +362,7 @@ private fun LocalBackupsSettingsEnabledNonLegacyPreview() {
     LocalBackupsSettingsScreen(
       state = LocalBackupsSettingsState(
         backupsEnabled = true,
-        lastBackupLabel = "Last backup: 1 hour ago",
+        lastBackupLabel = "1 hour ago",
         folderDisplayName = "Signal Backups",
         scheduleTimeLabel = "1:00 AM",
         progress = LocalBackupCreationProgress(idle = LocalBackupCreationProgress.Idle())

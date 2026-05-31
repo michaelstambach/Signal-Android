@@ -30,7 +30,7 @@ buildscript {
     classpath(libs.gradle)
     classpath(libs.androidx.navigation.safe.args.gradle.plugin)
     classpath(libs.protobuf.gradle.plugin)
-    classpath("com.squareup.wire:wire-gradle-plugin:4.4.3") {
+    classpath("com.squareup.wire:wire-gradle-plugin:6.0.0-alpha02") {
       exclude(group = "com.squareup.wire", module = "wire-swift-generator")
       exclude(group = "com.squareup.wire", module = "wire-grpc-client")
       exclude(group = "com.squareup.wire", module = "wire-grpc-jvm")
@@ -79,8 +79,9 @@ tasks.register("qa") {
 
 // Wire up QA dependencies after all projects are evaluated
 gradle.projectsEvaluated {
-  val appTestTask = tasks.findByPath(":Signal-Android:testPlayProdReleaseUnitTest")
-  val appLintTask = tasks.findByPath(":Signal-Android:lintPlayProdRelease")
+  val appTestTask = tasks.findByPath(":Signal-Android:testPlayProdReleaseUnitTest")!!
+  val appLintTask = tasks.findByPath(":Signal-Android:lintPlayProdRelease")!!
+  val appCompileInstrumentationTask = tasks.findByPath(":Signal-Android:compilePlayProdDebugAndroidTestSources")
 
   tasks.named("qa") {
     dependsOn("ktlintCheck")
@@ -88,8 +89,11 @@ gradle.projectsEvaluated {
     dependsOn("checkStopship")
 
     // Main app tasks
-    appTestTask?.let { dependsOn(it) }
-    appLintTask?.let { dependsOn(it) }
+    dependsOn(appTestTask)
+    dependsOn(appLintTask)
+
+    // Instrumentation
+    appCompileInstrumentationTask?.let { dependsOn(it) }
 
     // All subproject ktlint checks
     subprojects.forEach { subproject ->
@@ -116,9 +120,13 @@ gradle.projectsEvaluated {
   // If you let all of these things run in parallel, gradle will likely OOM.
   // To avoid this, we put non-app tests and lints behind the much heavier app tests and lints.
   subprojects.filter { it.name != "Signal-Android" }.forEach { subproject ->
-    subproject.tasks.findByName("testDebugUnitTest")?.mustRunAfter(appTestTask)
-    subproject.tasks.findByName("test")?.mustRunAfter(appTestTask)
-    subproject.tasks.findByName("lintDebug")?.mustRunAfter(appLintTask)
+    appTestTask.let { task ->
+      subproject.tasks.findByName("testDebugUnitTest")?.mustRunAfter(task)
+      subproject.tasks.findByName("test")?.mustRunAfter(task)
+    }
+    appLintTask.let { task ->
+      subproject.tasks.findByName("lintDebug")?.mustRunAfter(task)
+    }
   }
 }
 

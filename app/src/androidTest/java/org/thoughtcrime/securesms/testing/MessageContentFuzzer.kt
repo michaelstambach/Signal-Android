@@ -41,11 +41,12 @@ object MessageContentFuzzer {
   /**
    * Create an [Envelope].
    */
-  fun envelope(timestamp: Long, serverGuid: UUID = UUID.randomUUID()): Envelope {
+  fun envelope(timestamp: Long, serverGuid: UUID = UUID.randomUUID(), updatedPniBinary: ByteString? = null): Envelope {
     return Envelope.Builder()
-      .timestamp(timestamp)
+      .clientTimestamp(timestamp)
       .serverTimestamp(timestamp + 5)
       .serverGuidBinary(serverGuid.toByteArray().toByteString())
+      .also { if (updatedPniBinary != null) it.updatedPniBinary(updatedPniBinary) }
       .build()
   }
 
@@ -292,7 +293,7 @@ object MessageContentFuzzer {
             body = string()
             val quoted = quoteAble.random(random)
             quote = DataMessage.Quote.Builder().buildWith {
-              id = quoted.envelope.timestamp
+              id = quoted.envelope.clientTimestamp
               authorAciBinary = quoted.metadata.sourceServiceId.toByteString()
               text = quoted.content.dataMessage?.body
               attachments(quoted.content.dataMessage?.attachments ?: emptyList())
@@ -304,7 +305,7 @@ object MessageContentFuzzer {
           if (random.nextFloat() < 0.1 && quoteAble.isNotEmpty()) {
             val quoted = quoteAble.random(random)
             quote = DataMessage.Quote.Builder().buildWith {
-              id = random.nextLong(quoted.envelope.timestamp!! - 1000000, quoted.envelope.timestamp!!)
+              id = random.nextLong(quoted.envelope.clientTimestamp!! - 1000000, quoted.envelope.clientTimestamp!!)
               authorAciBinary = quoted.metadata.sourceServiceId.toByteString()
               text = quoted.content.dataMessage?.body
             }
@@ -333,7 +334,7 @@ object MessageContentFuzzer {
               emoji = emojis.random(random)
               remove = false
               targetAuthorAciBinary = reactTo.metadata.sourceServiceId.toByteString()
-              targetSentTimestamp = reactTo.envelope.timestamp
+              targetSentTimestamp = reactTo.envelope.clientTimestamp
             }
           }
         }

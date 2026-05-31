@@ -5,6 +5,7 @@ import okio.ByteString.Companion.toByteString
 import org.signal.core.models.ServiceId
 import org.signal.core.util.logging.Log
 import org.signal.libsignal.protocol.message.CiphertextMessage
+import org.signal.network.exceptions.PushNetworkException
 import org.thoughtcrime.securesms.database.SignalDatabase.Companion.groups
 import org.thoughtcrime.securesms.dependencies.AppDependencies
 import org.thoughtcrime.securesms.groups.GroupChangeBusyException
@@ -21,7 +22,6 @@ import org.thoughtcrime.securesms.util.SignalLocalMetrics
 import org.whispersystems.signalservice.api.crypto.EnvelopeMetadata
 import org.whispersystems.signalservice.api.crypto.protos.CompleteMessage
 import org.whispersystems.signalservice.api.groupsv2.NoCredentialForRedemptionTimeException
-import org.whispersystems.signalservice.api.push.exceptions.PushNetworkException
 import org.whispersystems.signalservice.internal.push.Content
 import org.whispersystems.signalservice.internal.push.Envelope
 import org.whispersystems.signalservice.internal.util.Util
@@ -155,7 +155,7 @@ class PushProcessMessageJob private constructor(
         try {
           messageProcessor.process(result.envelope, result.content, result.metadata, result.serverDeliveredTimestamp, localMetric = localReceiveMetric, batchCache = batchCache)
         } catch (e: Exception) {
-          Log.e(TAG, "Failed to process message with timestamp ${result.envelope.timestamp}. Dropping.", e)
+          Log.e(TAG, "Failed to process message with timestamp ${result.envelope.clientTimestamp}. Dropping.", e)
         }
         null
       }

@@ -175,6 +175,10 @@ object ExportSkips {
     return log(sentTimestamp, "Invalid e164 in sessions switchover event. Exporting an empty event.")
   }
 
+  fun donationRequestNotInReleaseNotesChat(sentTimestamp: Long): String {
+    return log(sentTimestamp, "Donation request not in Release Notes chat.")
+  }
+
   private fun log(sentTimestamp: Long, message: String): String {
     return "[SKIP][$sentTimestamp] $message"
   }
@@ -192,6 +196,10 @@ object ExportOddities {
 
   fun mismatchedRevisionHistory(sentTimestamp: Long): String {
     return log(sentTimestamp, "Revisions for this message contained items of a different type than the parent item. Ignoring mismatched revisions.")
+  }
+
+  fun mismatchedRevisionAuthor(sentTimestamp: Long): String {
+    return log(sentTimestamp, "Revisions for this message contained items with a different author than the parent item. Ignoring mismatched revisions.")
   }
 
   fun outgoingMessageWasSentButTimerNotStarted(sentTimestamp: Long): String {

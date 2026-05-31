@@ -24,6 +24,7 @@ import io.reactivex.rxjava3.core.Maybe
 import io.reactivex.rxjava3.core.Single
 import io.reactivex.rxjava3.core.SingleEmitter
 import io.reactivex.rxjava3.schedulers.Schedulers
+import org.signal.core.util.DrawableUtil
 import org.signal.core.util.StreamUtil
 import org.signal.core.util.Util
 import org.signal.core.util.concurrent.MaybeCompat
@@ -92,7 +93,7 @@ import org.thoughtcrime.securesms.recipients.RecipientUtil
 import org.thoughtcrime.securesms.sms.MessageSender
 import org.thoughtcrime.securesms.sms.MessageSender.PreUploadResult
 import org.thoughtcrime.securesms.transport.UndeliverableMessageException
-import org.thoughtcrime.securesms.util.DrawableUtil
+import org.thoughtcrime.securesms.util.AdaptiveBitmapMetrics
 import org.thoughtcrime.securesms.util.GroupUtil
 import org.thoughtcrime.securesms.util.MediaUtil
 import org.thoughtcrime.securesms.util.MessageUtil
@@ -155,7 +156,7 @@ class ConversationRepository(
         metadata.threadSize
       )
       val config = PagingConfig.Builder().setPageSize(25)
-        .setBufferPages(2)
+        .setBufferPages(3)
         .setStartIndex(max(metadata.getStartPosition(), 0))
         .build()
 
@@ -221,6 +222,13 @@ class ConversationRepository(
       if (threadRecipient.isPushV2Group && threadRecipient.groupId.getOrNull()?.isV2 != true) {
         Log.w(TAG, "Missing group id")
         emitter.tryOnError(Exception("Poll terminate failed"))
+        return@create
+      }
+
+      if (threadRecipient.isPushV2Group && !SignalDatabase.groups.isActive(threadRecipient.requireGroupId())) {
+        Log.w(TAG, "Cannot end poll in terminated or inactive group")
+        emitter.tryOnError(Exception("Poll terminate failed"))
+        return@create
       }
 
       val message = OutgoingMessage.pollTerminateMessage(
@@ -265,7 +273,7 @@ class ConversationRepository(
           Log.i(TAG, "Some recipients skipped when sending end poll. Resending to $filterRecipientIds")
           MessageSender.resendGroupMessage(applicationContext, messageRecord, filterRecipientIds)
         } else {
-          SignalDatabase.messages.markAsSent(messageId, true)
+          SignalDatabase.messages.markAsSent(messageId)
         }
         emitter.onComplete()
       } else {
@@ -373,7 +381,7 @@ class ConversationRepository(
           Log.i(TAG, "Some recipients skipped when sending pin message. Resending to $filterRecipientIds")
           MessageSender.resendGroupMessage(applicationContext, messageRecord, filterRecipientIds)
         } else {
-          SignalDatabase.messages.markAsSent(insertResult.messageId, true)
+          SignalDatabase.messages.markAsSent(insertResult.messageId)
         }
         emitter.onComplete()
       } else {
@@ -428,6 +436,16 @@ class ConversationRepository(
       } else {
         emitter.tryOnError(Exception("Unpin message failed"))
       }
+    }.subscribeOn(Schedulers.io())
+  }
+
+  fun setMessageStarred(messageId: Long, starred: Boolean): Completable {
+    return setMessagesStarred(setOf(messageId), starred)
+  }
+
+  fun setMessagesStarred(messageIds: Set<Long>, starred: Boolean): Completable {
+    return Completable.fromAction {
+      SignalDatabase.messages.setStarred(messageIds, starred)
     }.subscribeOn(Schedulers.io())
   }
 
@@ -832,6 +850,18 @@ class ConversationRepository(
       .subscribeOn(Schedulers.io())
   }
 
+  fun collapseEvents(messageId: Long) {
+    SignalDatabase.messages.collapseEvents(messageId)
+  }
+
+  fun collapseAllEvents() {
+    SignalDatabase.messages.collapseAllEvents()
+  }
+
+  fun expandEvents(messageId: Long) {
+    SignalDatabase.messages.expandEvents(messageId)
+  }
+
   /**
    * Glide target for a contact photo which expects an error drawable, and publishes
    * the result to the given emitter.
@@ -869,9 +899,9 @@ class ConversationRepository(
       override fun transformToFinalBitmap(): Single<Bitmap> {
         return Single.create {
           val bitmap = if (Build.VERSION.SDK_INT <= 25) {
-            DrawableUtil.wrapBitmapForShortcutInfo(DrawableUtil.toBitmap(drawable, SHORTCUT_ICON_SIZE, SHORTCUT_ICON_SIZE))
+            AdaptiveBitmapMetrics.wrapBitmap(DrawableUtil.toBitmap(drawable, SHORTCUT_ICON_SIZE, SHORTCUT_ICON_SIZE))
           } else {
-            DrawableUtil.wrapBitmapForShortcutInfo(drawable.toBitmap(SHORTCUT_ICON_SIZE, SHORTCUT_ICON_SIZE))
+            AdaptiveBitmapMetrics.wrapBitmap(drawable.toBitmap(SHORTCUT_ICON_SIZE, SHORTCUT_ICON_SIZE))
           }
           it.setCancellable {
             bitmap.recycle()
@@ -884,7 +914,7 @@ class ConversationRepository(
     class BitmapResult(private val bitmap: Bitmap) : ContactPhotoResult {
       override fun transformToFinalBitmap(): Single<Bitmap> {
         return Single.create {
-          val bitmap = DrawableUtil.wrapBitmapForShortcutInfo(bitmap)
+          val bitmap = AdaptiveBitmapMetrics.wrapBitmap(bitmap)
           it.setCancellable {
             bitmap.recycle()
           }

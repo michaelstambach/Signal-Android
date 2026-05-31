@@ -75,7 +75,8 @@ class SignalClient {
    */
   fun initializeSession(to: SignalClient) {
     val address = SignalProtocolAddress(to.aci.toString(), 1)
-    SessionBuilder(store, address).process(to.createPreKeyBundle())
+    val localAddress = SignalProtocolAddress(aci.libSignalAci, 1)
+    SessionBuilder(store, address, localAddress).process(to.createPreKeyBundle())
   }
 
   fun initializedGroupSession(distributionId: DistributionId): SenderKeyDistributionMessage {
@@ -104,9 +105,9 @@ class SignalClient {
 
     return Envelope(
       sourceServiceId = aci.toString(),
-      sourceDevice = 1,
+      sourceDeviceId = 1,
       destinationServiceId = to.aci.toString(),
-      timestamp = sentTimestamp,
+      clientTimestamp = sentTimestamp,
       serverTimestamp = sentTimestamp,
       serverGuid = serviceGuid.toString(),
       type = Envelope.Type.fromValue(outgoingPushMessage.type),
@@ -139,9 +140,9 @@ class SignalClient {
 
     return Envelope(
       sourceServiceId = aci.toString(),
-      sourceDevice = 1,
+      sourceDeviceId = 1,
       destinationServiceId = to.aci.toString(),
-      timestamp = sentTimestamp,
+      clientTimestamp = sentTimestamp,
       serverTimestamp = sentTimestamp,
       serverGuid = serverGuid.toString(),
       type = Envelope.Type.fromValue(outgoingPushMessage.type),

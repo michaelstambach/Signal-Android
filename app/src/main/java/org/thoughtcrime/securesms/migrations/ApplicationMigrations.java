@@ -195,9 +195,17 @@ public class ApplicationMigrations {
     static final int STICKER_PACK_ADDITION_2       = 151;
     static final int DELETED_BY_DB_MIGRATION       = 152;
     static final int RELEASE_CHANNEL_RECIPIENT_FIX = 153;
+    static final int EMOJI_VERSION_13              = 154;
+    static final int COLLAPSED_EVENTS              = 155;
+    static final int COLLAPSED_EVENTS_2            = 156;
+    static final int KEY_TRANSPARENCY              = 157;
+    static final int RELEASE_NOTES_CHAT_SYNC       = 158;
+    static final int READ_INDEX_DB_MIGRATION       = 159;
+    // Need to skip 160 due to release ordering issues
+    static final int SVR2_ENCLAVE_UPDATE_6         = 161;
   }
 
-  public static final int CURRENT_VERSION = 153;
+  public static final int CURRENT_VERSION = 161;
 
   /**
    * This *must* be called after the {@link JobManager} has been instantiated, but *before* the call
@@ -902,6 +910,34 @@ public class ApplicationMigrations {
 
     if (lastSeenVersion < Version.RELEASE_CHANNEL_RECIPIENT_FIX) {
       jobs.put(Version.RELEASE_CHANNEL_RECIPIENT_FIX, new ReleaseChannelRecipientFixMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.EMOJI_VERSION_13) {
+      jobs.put(Version.EMOJI_VERSION_13, new EmojiDownloadMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.COLLAPSED_EVENTS) {
+      jobs.put(Version.COLLAPSED_EVENTS, new BackfillCollapsedEventsMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.COLLAPSED_EVENTS_2) {
+      jobs.put(Version.COLLAPSED_EVENTS_2, new BackfillCollapsedEventsMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.KEY_TRANSPARENCY) {
+      jobs.put(Version.KEY_TRANSPARENCY, new ResetKeyTransparencyMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.RELEASE_NOTES_CHAT_SYNC) {
+      jobs.put(Version.RELEASE_NOTES_CHAT_SYNC, new AccountRecordMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.READ_INDEX_DB_MIGRATION) {
+      jobs.put(Version.READ_INDEX_DB_MIGRATION, new DatabaseMigrationJob());
+    }
+
+    if (lastSeenVersion < Version.SVR2_ENCLAVE_UPDATE_6) {
+      jobs.put(Version.SVR2_ENCLAVE_UPDATE_6, new Svr2MirrorMigrationJob());
     }
 
     return jobs;

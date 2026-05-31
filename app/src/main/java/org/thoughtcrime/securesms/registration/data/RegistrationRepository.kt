@@ -30,6 +30,7 @@ import org.signal.core.util.logging.Log
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.util.KeyHelper
 import org.signal.libsignal.zkgroup.profiles.ProfileKey
+import org.signal.network.NetworkResult
 import org.thoughtcrime.securesms.AppCapabilities
 import org.thoughtcrime.securesms.crypto.PreKeyUtil
 import org.thoughtcrime.securesms.crypto.ProfileKeyUtil
@@ -74,7 +75,6 @@ import org.thoughtcrime.securesms.registration.viewmodel.SvrAuthCredentialSet
 import org.thoughtcrime.securesms.service.DirectoryRefreshListener
 import org.thoughtcrime.securesms.service.RotateSignedPreKeyListener
 import org.thoughtcrime.securesms.util.TextSecurePreferences
-import org.whispersystems.signalservice.api.NetworkResult
 import org.whispersystems.signalservice.api.SvrNoDataException
 import org.whispersystems.signalservice.api.account.AccountAttributes
 import org.whispersystems.signalservice.api.account.PreKeyCollection
@@ -184,6 +184,7 @@ object RegistrationRepository {
     val aci: ACI = ACI.parseOrThrow(data.aci)
     val pni: PNI = PNI.parseOrThrow(data.pni)
     val hasPin: Boolean = data.hasPin
+    val isAciChanged: Boolean = SignalStore.account.aci != aci
 
     SignalStore.account.setAci(aci)
     SignalStore.account.setPni(pni)
@@ -232,7 +233,7 @@ object RegistrationRepository {
     }
 
     SignalStore.account.setServicePassword(data.servicePassword)
-    SignalStore.account.setRegistered(true)
+    SignalStore.account.setRegistered(registered = true, isAciChanged = isAciChanged)
     TextSecurePreferences.setPromptedPushRegistration(context, true)
     TextSecurePreferences.setUnauthorizedReceived(context, false)
     NotificationManagerCompat.from(context).cancel(NotificationIds.UNREGISTERED_NOTIFICATION_ID)
@@ -515,6 +516,8 @@ object RegistrationRepository {
       .registrationApi
       .registerAsSecondaryDevice(message.provisioningCode!!, accountAttributes, aciPreKeys, pniPreKeys, registrationData.fcmToken)
       .map { respone ->
+        val aep = AccountEntropyPool(message.accountEntropyPool!!)
+
         RegisterAsLinkedDeviceResponse(
           deviceId = respone.deviceId.toInt(),
           accountRegistrationResult = AccountRegistrationResult(
@@ -522,7 +525,7 @@ object RegistrationRepository {
             pni = pni.toString(),
             storageCapable = false,
             number = message.number!!,
-            masterKey = MasterKey(message.masterKey!!.toByteArray()),
+            masterKey = aep.deriveMasterKey(),
             pin = null,
             aciPreKeyCollection = aciPreKeys,
             pniPreKeyCollection = pniPreKeys,

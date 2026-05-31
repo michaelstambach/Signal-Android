@@ -27,6 +27,7 @@ import androidx.annotation.Nullable;
 import androidx.annotation.Px;
 import androidx.annotation.UiThread;
 import androidx.appcompat.widget.AppCompatImageView;
+import com.google.android.material.color.MaterialColors;
 
 import com.bumptech.glide.RequestBuilder;
 import com.bumptech.glide.RequestManager;
@@ -35,6 +36,7 @@ import com.bumptech.glide.request.Request;
 import com.bumptech.glide.request.RequestListener;
 import com.bumptech.glide.request.RequestOptions;
 
+import org.signal.core.models.media.TransformProperties;
 import org.signal.core.util.concurrent.ListenableFuture;
 import org.signal.core.util.concurrent.SettableFuture;
 import org.signal.core.util.logging.Log;
@@ -347,6 +349,7 @@ public class ThumbnailView extends FrameLayout {
 
       transferControlViewStub.setVisibility(View.GONE);
       playOverlay.setVisibility(View.GONE);
+      setBackgroundColor(Color.TRANSPARENT);
 
       requestManager.clear(blurHash);
       blurHash.setImageDrawable(null);
@@ -407,6 +410,8 @@ public class ThumbnailView extends FrameLayout {
     }
 
     if (this.slide != null && this.slide.getFastPreflightId() != null &&
+        this.slide.isInProgress() == slide.isInProgress() &&
+        image.getDrawable() != null &&
         (!slide.hasVideo() || Util.equals(this.slide.getUri(), slide.getUri())) &&
         Util.equals(this.slide.getFastPreflightId(), slide.getFastPreflightId()))
     {
@@ -484,6 +489,12 @@ public class ThumbnailView extends FrameLayout {
     } else {
       requestManager.clear(image);
       image.setImageDrawable(null);
+    }
+
+    if (slide.getTransferState() == AttachmentTable.TRANSFER_RESTORE_OFFLOADED && slide.getDisplayUri() == null) {
+      setBackgroundColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurfaceVariant, Color.GRAY));
+    } else {
+      setBackgroundColor(Color.TRANSPARENT);
     }
 
     if (!resultHandled) {
@@ -598,7 +609,14 @@ public class ThumbnailView extends FrameLayout {
   }
 
   private RequestBuilder<Drawable> buildThumbnailRequestBuilder(@NonNull RequestManager requestManager, @NonNull Slide slide) {
-    RequestBuilder<Drawable> requestBuilder = applySizing(requestManager.load(new DecryptableUri(Objects.requireNonNull(slide.getDisplayUri())))
+    long                videoTrimStartTimeUs = 0;
+    TransformProperties transformProperties  = slide.asAttachment().transformProperties;
+
+    if (transformProperties != null && !transformProperties.shouldSkipTransform()) {
+      videoTrimStartTimeUs = transformProperties.videoTrimStartTimeUs;
+    }
+
+    RequestBuilder<Drawable> requestBuilder = applySizing(requestManager.load(new DecryptableUri(Objects.requireNonNull(slide.getDisplayUri()), videoTrimStartTimeUs))
                                                               .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                                                               .downsample(SignalDownsampleStrategy.CENTER_OUTSIDE_NO_UPSCALE)
                                                               .transition(withCrossFade()));

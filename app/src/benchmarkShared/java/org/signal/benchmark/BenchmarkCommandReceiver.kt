@@ -23,7 +23,7 @@ import org.thoughtcrime.securesms.groups.GroupId
 import org.thoughtcrime.securesms.recipients.Recipient
 import org.whispersystems.signalservice.internal.push.Envelope
 import org.whispersystems.signalservice.internal.websocket.BenchmarkWebSocketConnection
-import org.whispersystems.signalservice.internal.websocket.WebSocketRequestMessage
+import org.signal.network.websocket.WebSocketRequestMessage
 import kotlin.random.Random
 
 /**
@@ -212,7 +212,7 @@ class BenchmarkCommandReceiver : BroadcastReceiver() {
       verb = "PUT",
       path = "/api/v1/message",
       id = Random.nextLong(),
-      headers = listOf("X-Signal-Timestamp: ${this.timestamp}"),
+      headers = listOf("X-Signal-Timestamp: ${this.serverTimestamp}"),
       body = this.encodeByteString()
     )
   }

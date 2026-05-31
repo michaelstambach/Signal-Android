@@ -18,6 +18,7 @@ import org.signal.core.ui.util.StorageUtil
 import org.signal.core.util.logging.Log
 import org.thoughtcrime.securesms.R
 import org.thoughtcrime.securesms.backup.BackupPassphrase
+import org.thoughtcrime.securesms.backup.LocalExportProgress
 import org.thoughtcrime.securesms.components.settings.app.backups.remote.BackupKeyCredentialManagerHandler
 import org.thoughtcrime.securesms.components.settings.app.backups.remote.BackupKeySaveState
 import org.thoughtcrime.securesms.dependencies.AppDependencies
@@ -74,7 +75,7 @@ class LocalBackupsViewModel : ViewModel(), BackupKeyCredentialManagerHandler {
     }
 
     viewModelScope.launch {
-      SignalStore.backup.newLocalBackupProgressFlow.collect { progress ->
+      LocalExportProgress.encryptedProgress.collect { progress ->
         internalSettingsState.update { it.copy(progress = progress) }
       }
     }
@@ -108,11 +109,11 @@ class LocalBackupsViewModel : ViewModel(), BackupKeyCredentialManagerHandler {
   }
 
   fun onBackupStarted() {
-    SignalStore.backup.newLocalBackupProgress = LocalBackupCreationProgress(exporting = LocalBackupCreationProgress.Exporting(phase = LocalBackupCreationProgress.ExportPhase.NONE))
+    LocalExportProgress.setEncryptedProgress(LocalBackupCreationProgress(exporting = LocalBackupCreationProgress.Exporting(phase = LocalBackupCreationProgress.ExportPhase.NONE)))
   }
 
   fun turnOffAndDelete(context: Context) {
-    internalSettingsState.update { it.copy(isDeleting = true) }
+    internalSettingsState.update { it.copy(isDeleting = true, deleteCompleted = 0, deleteTotal = 0) }
 
     viewModelScope.launch {
       withContext(Dispatchers.IO) {
@@ -120,10 +121,12 @@ class LocalBackupsViewModel : ViewModel(), BackupKeyCredentialManagerHandler {
         val path = SignalStore.backup.newLocalBackupsDirectory
         SignalStore.backup.newLocalBackupsDirectory = null
         AppDependencies.jobManager.cancelAllInQueue(LocalBackupJob.QUEUE)
-        BackupUtil.deleteUnifiedBackups(context, path)
+        BackupUtil.deleteUnifiedBackups(context, path) { completed, total ->
+          internalSettingsState.update { it.copy(deleteCompleted = completed, deleteTotal = total) }
+        }
       }
 
-      internalSettingsState.update { it.copy(isDeleting = false) }
+      internalSettingsState.update { it.copy(isDeleting = false, deleteCompleted = 0, deleteTotal = 0) }
     }
   }
 

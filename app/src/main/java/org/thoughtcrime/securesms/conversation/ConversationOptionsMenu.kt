@@ -51,7 +51,7 @@ internal object ConversationOptionsMenu {
         canShowAsBubble,
         isActiveGroup,
         isActiveV2Group,
-        isInActiveGroup,
+        isInactiveGroup,
         hasActiveGroupCall,
         distributionType,
         threadId,
@@ -104,12 +104,12 @@ internal object ConversationOptionsMenu {
 
       if (isPushAvailable) {
         if (recipient.expiresInSeconds > 0) {
-          if (!isInActiveGroup) {
+          if (!isInactiveGroup) {
             menuInflater.inflate(R.menu.conversation_expiring_on, menu)
           }
           callback.showExpiring(recipient)
         } else {
-          if (!isInActiveGroup) {
+          if (!isInactiveGroup) {
             menuInflater.inflate(R.menu.conversation_expiring_off, menu)
           }
           callback.clearExpiring()
@@ -150,6 +150,11 @@ internal object ConversationOptionsMenu {
         hideMenuItem(menu, R.id.menu_mute_notifications)
       }
 
+      if (recipient.isGroup && isInactiveGroup) {
+        hideMenuItem(menu, R.id.menu_mute_notifications)
+        hideMenuItem(menu, R.id.menu_unmute_notifications)
+      }
+
       if (recipient.isBlocked) {
         if (isPushAvailable) {
           hideMenuItem(menu, R.id.menu_call_secure)
@@ -162,11 +167,17 @@ internal object ConversationOptionsMenu {
 
       if (recipient.isReleaseNotes) {
         hideMenuItem(menu, R.id.menu_add_shortcut)
+        menu.findItem(R.id.menu_mute_notifications)?.apply {
+          setIcon(R.drawable.symbol_bell_24)
+          setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+        }
+        menu.findItem(R.id.menu_unmute_notifications)?.apply {
+          setIcon(R.drawable.symbol_bell_slash_24)
+          setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+        }
       }
 
-      if (SignalStore.labs.individualChatPlaintextExport) {
-        menu.findItem(R.id.menu_export)?.title = menu.findItem(R.id.menu_export)?.title.toString() + " (Labs)"
-      } else {
+      if (!SignalStore.labs.individualChatPlaintextExport) {
         hideMenuItem(menu, R.id.menu_export)
       }
 

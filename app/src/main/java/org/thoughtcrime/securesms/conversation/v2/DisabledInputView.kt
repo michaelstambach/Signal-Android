@@ -44,10 +44,10 @@ class DisabledInputView @JvmOverloads constructor(
   private var expiredOrUnauthorized: View? = null
   private var messageRequestView: MessageRequestsBottomView? = null
   private var noLongerAMember: View? = null
+  private var terminatedGroup: View? = null
   private var requestingGroup: View? = null
   private var announcementGroupOnly: TextView? = null
   private var inviteToSignal: View? = null
-  private var releaseNoteChannel: View? = null
   private var incognitoView: View? = null
 
   private var currentView: View? = null
@@ -93,10 +93,12 @@ class DisabledInputView @JvmOverloads constructor(
         setWallpaperEnabled(recipient.hasWallpaper)
 
         setAcceptOnClickListener {
-          if (messageRequestState.isFewConnectionsIndividual) {
+          if (messageRequestState.isIndividual) {
+            val signalWillNever = context.getString(R.string.MessageRequestBottomView_signal_will_never)
+            val body = context.getString(R.string.MessageRequestBottomView_accept_request_body, signalWillNever)
             MaterialAlertDialogBuilder(context)
               .setTitle(R.string.MessageRequestBottomView_accept_request)
-              .setMessage(R.string.MessageRequestBottomView_review_requests_carefully)
+              .setMessage(SpanUtil.boldSubstring(body, signalWillNever))
               .setPositiveButton(R.string.MessageRequestBottomView_accept) { _, _ -> listener?.onAcceptMessageRequestClicked() }
               .setNegativeButton(android.R.string.cancel, null)
               .show()
@@ -123,6 +125,13 @@ class DisabledInputView @JvmOverloads constructor(
     noLongerAMember = show(
       existingView = noLongerAMember,
       create = { inflater.inflate(R.layout.conversation_no_longer_a_member, this, false) }
+    )
+  }
+
+  fun showAsTerminatedGroup() {
+    terminatedGroup = show(
+      existingView = terminatedGroup,
+      create = { inflater.inflate(R.layout.conversation_group_terminated, this, false) }
     )
   }
 
@@ -177,21 +186,6 @@ class DisabledInputView @JvmOverloads constructor(
     )
   }
 
-  fun showAsReleaseNotesChannel(recipient: Recipient) {
-    releaseNoteChannel = show(
-      existingView = releaseNoteChannel,
-      create = { inflater.inflate(R.layout.conversation_activity_unmute, this, false) },
-      bind = {
-        if (recipient.isMuted) {
-          visible = true
-          findViewById<View>(R.id.conversation_activity_unmute_button).setOnClickListener { listener?.onUnmuteReleaseNotesChannel() }
-        } else {
-          visible = false
-        }
-      }
-    )
-  }
-
   fun setWallpaperEnabled(wallpaperEnabled: Boolean) {
     color = ContextCompat.getColor(context, if (wallpaperEnabled) R.color.wallpaper_bubble_color else CoreUiR.color.signal_colorBackground)
     setBackgroundColor(color)
@@ -216,6 +210,7 @@ class DisabledInputView @JvmOverloads constructor(
     messageRequestView?.hideBusy()
     messageRequestView = null
     noLongerAMember = null
+    terminatedGroup = null
     requestingGroup = null
     announcementGroupOnly = null
     incognitoView = null
@@ -261,7 +256,6 @@ class DisabledInputView @JvmOverloads constructor(
     fun onBlockClicked()
     fun onUnblockClicked()
     fun onInviteToSignal(recipient: Recipient)
-    fun onUnmuteReleaseNotesChannel()
     fun onReportSpamClicked()
   }
 }

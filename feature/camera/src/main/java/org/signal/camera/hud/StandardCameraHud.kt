@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -122,6 +123,7 @@ fun BoxScope.StandardCameraHud(
   val viewConfiguration = LocalViewConfiguration.current
   var volumeKeyPressStartTime by remember { mutableStateOf(0L) }
   var isRecordingFromVolumeKey by remember { mutableStateOf(false) }
+  var activeVolumeKeyCode by remember { mutableStateOf(0) }
 
   LaunchedEffect(Unit) {
     focusRequester.requestFocus()
@@ -165,9 +167,14 @@ fun BoxScope.StandardCameraHud(
         when (nativeEvent.action) {
           KeyEvent.ACTION_DOWN -> {
             if (nativeEvent.repeatCount == 0) {
-              volumeKeyPressStartTime = nativeEvent.eventTime
-              isRecordingFromVolumeKey = false
-            } else if (!isRecordingFromVolumeKey &&
+              if (activeVolumeKeyCode == 0) {
+                activeVolumeKeyCode = keyCode
+                volumeKeyPressStartTime = nativeEvent.eventTime
+                isRecordingFromVolumeKey = false
+              }
+            } else if (keyCode == activeVolumeKeyCode &&
+              !state.isRecording &&
+              !isRecordingFromVolumeKey &&
               volumeKeyPressStartTime > 0 &&
               nativeEvent.eventTime - volumeKeyPressStartTime >= viewConfiguration.longPressTimeoutMillis
             ) {
@@ -183,13 +190,16 @@ fun BoxScope.StandardCameraHud(
           }
 
           KeyEvent.ACTION_UP -> {
-            if (isRecordingFromVolumeKey) {
-              isRecordingFromVolumeKey = false
-              emitter(StandardCameraHudEvents.VideoCaptureStopped)
-            } else if (volumeKeyPressStartTime > 0) {
-              emitter(StandardCameraHudEvents.PhotoCaptureTriggered)
+            if (keyCode == activeVolumeKeyCode) {
+              if (isRecordingFromVolumeKey) {
+                isRecordingFromVolumeKey = false
+                emitter(StandardCameraHudEvents.VideoCaptureStopped)
+              } else if (volumeKeyPressStartTime > 0 && !state.isRecording) {
+                emitter(StandardCameraHudEvents.PhotoCaptureTriggered)
+              }
+              volumeKeyPressStartTime = 0
+              activeVolumeKeyCode = 0
             }
-            volumeKeyPressStartTime = 0
             true
           }
 
@@ -391,7 +401,7 @@ private fun CameraSwitchButton(
   modifier: Modifier = Modifier
 ) {
   val contentDescription = if (stringResources.switchCamera != 0) {
-    LocalContext.current.getString(stringResources.switchCamera)
+    stringResource(stringResources.switchCamera)
   } else {
     null
   }
@@ -419,8 +429,6 @@ private fun FlashToggleButton(
   stringResources: StringResources,
   modifier: Modifier = Modifier
 ) {
-  val context = LocalContext.current
-
   val icon = when (flashMode) {
     FlashMode.Off -> SignalIcons.FlashOff
     FlashMode.On -> SignalIcons.FlashOn
@@ -434,7 +442,7 @@ private fun FlashToggleButton(
   }
 
   val contentDescription = if (contentDescriptionRes != 0) {
-    context.getString(contentDescriptionRes)
+    stringResource(contentDescriptionRes)
   } else {
     null
   }
@@ -469,7 +477,7 @@ private fun MediaCountIndicator(
   modifier: Modifier = Modifier
 ) {
   val contentDescription = if (stringResources.send != 0) {
-    LocalContext.current.getString(stringResources.send)
+    stringResource(stringResources.send)
   } else {
     null
   }

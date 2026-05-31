@@ -46,6 +46,7 @@ import android.view.MotionEvent;
 import android.view.TouchDelegate;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewStub;
 import android.widget.Button;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
@@ -69,11 +70,13 @@ import com.google.common.collect.Sets;
 import org.greenrobot.eventbus.EventBus;
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
+import org.signal.core.ui.util.ThemeUtil;
+import org.signal.core.ui.view.Stub;
 import org.signal.core.util.BidiUtil;
 import org.signal.core.util.DimensionUnit;
 import org.signal.core.util.StringUtil;
+import org.signal.core.util.Util;
 import org.signal.core.util.logging.Log;
-import org.signal.core.ui.view.Stub;
 import org.signal.ringrtc.CallLinkRootKey;
 import org.thoughtcrime.securesms.BindableConversationItem;
 import org.thoughtcrime.securesms.R;
@@ -146,14 +149,12 @@ import org.thoughtcrime.securesms.util.LongClickMovementMethod;
 import org.thoughtcrime.securesms.util.MediaUtil;
 import org.thoughtcrime.securesms.util.MessageRecordUtil;
 import org.thoughtcrime.securesms.util.PlaceholderURLSpan;
-import org.thoughtcrime.securesms.util.SpanUtil;
 import org.thoughtcrime.securesms.util.Projection;
 import org.thoughtcrime.securesms.util.ProjectionList;
 import org.thoughtcrime.securesms.util.RemoteConfig;
 import org.thoughtcrime.securesms.util.SearchUtil;
-import org.signal.core.ui.util.ThemeUtil;
+import org.thoughtcrime.securesms.util.SpanUtil;
 import org.thoughtcrime.securesms.util.UrlClickHandler;
-import org.signal.core.util.Util;
 import org.thoughtcrime.securesms.util.VibrateUtil;
 import org.thoughtcrime.securesms.util.ViewUtil;
 import org.thoughtcrime.securesms.util.views.NullableStub;
@@ -203,6 +204,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   private Optional<MessageRecord>     nextMessageRecord;
   private Locale                      locale;
   private boolean                     groupThread;
+  private boolean                     isReleaseNotes;
   private LiveRecipient               author;
   private RequestManager              requestManager;
   private Optional<MessageRecord>     previousMessage;
@@ -218,6 +220,10 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   @Nullable private ConversationItemFooter     stickerFooter;
   @Nullable private SenderNameWithLabelView    senderWithLabelView;
   @Nullable private View                       groupSenderHolder;
+  @Nullable private ViewStub                    starredSourceStub;
+  @Nullable private View                       starredSourceWrapper;
+  @Nullable private TextView                   starredSourceView;
+  @Nullable private AvatarImageView            starredSourceAvatar;
   private           AvatarImageView            contactPhoto;
   private           AlertView                  alertView;
   private           ReactionsConversationView  reactionsView;
@@ -285,6 +291,8 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   private final ProjectionList     colorizerProjections = new ProjectionList(3);
   private       boolean            isBound              = false;
 
+  private RelativeLayout.LayoutParams normalBubbleParams = null;
+
   private final Runnable shrinkBubble = new Runnable() {
     @Override
     public void run() {
@@ -340,6 +348,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
     this.stickerFooter             = findViewById(R.id.conversation_item_sticker_footer);
     this.senderWithLabelView       = findViewById(R.id.group_sender_name_with_label);
     this.groupSenderHolder         = findViewById(R.id.group_sender_holder);
+    this.starredSourceStub         = findViewById(R.id.conversation_item_starred_source_stub);
     this.alertView                 = findViewById(R.id.indicators_parent);
     this.contactPhoto              = findViewById(R.id.contact_photo);
     this.contactPhotoHolder        = findViewById(R.id.contact_photo_container);
@@ -406,12 +415,16 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
     this.batchSelected         = batchSelected;
     this.conversationRecipient = conversationRecipient.live();
     this.groupThread           = conversationRecipient.isGroup();
+    this.isReleaseNotes        = conversationRecipient.isReleaseNotes();
     this.author                = messageRecord.getFromRecipient().live();
     this.canPlayContent        = false;
     this.mediaItem             = null;
     this.colorizer             = colorizer;
     this.displayMode           = displayMode;
     this.previousMessage       = previousMessageRecord;
+
+    lastFooterDecisionLineWidth = -1;
+    lastFooterWasCollapsed      = false;
 
     setGutterSizes(messageRecord, groupThread);
     setMessageShape(messageRecord, previousMessageRecord, nextMessageRecord, groupThread);
@@ -423,6 +436,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
     setContactPhoto(author.get());
     setSenderNameAndLabel(author.get());
     setAuthor(messageRecord, previousMessageRecord, nextMessageRecord, groupThread, hasWallpaper);
+    setStarredSource(messageRecord, conversationMessage);
     setQuote(messageRecord, previousMessageRecord, nextMessageRecord, groupThread);
     setMessageSpacing(context, messageRecord, previousMessageRecord, nextMessageRecord, groupThread);
     setReactions(messageRecord);
@@ -467,7 +481,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
 
   @Override
   public boolean dispatchTouchEvent(MotionEvent ev) {
-    if (isCondensedMode()) return super.dispatchTouchEvent(ev);
+    if (isSuppressedInteractionMode()) return super.dispatchTouchEvent(ev);
 
     switch (ev.getAction()) {
       case MotionEvent.ACTION_DOWN:
@@ -588,7 +602,14 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
       int  collapsedTopMargin = -1 * (dateView.getMeasuredHeight() + ViewUtil.dpToPx(4));
 
       if (bodyText.isSingleLine() && !messageRecord.isFailed()) {
-        int maxBubbleWidth  = hasBigImageLinkPreview(messageRecord) || hasThumbnail(messageRecord) ? readDimen(R.dimen.media_bubble_max_width) : getMaxBubbleWidth();
+        int maxBubbleWidth = hasBigImageLinkPreview(messageRecord) || hasThumbnail(messageRecord) ? readDimen(R.dimen.media_bubble_max_width) : getMaxBubbleWidth();
+        if (hasThumbnail(messageRecord) || hasBigImageLinkPreview(messageRecord)) {
+          int thumbnailWidth = mediaThumbnailStub.resolved() ? mediaThumbnailStub.require().getMeasuredWidth() : 0;
+          if (thumbnailWidth > 0) {
+            maxBubbleWidth = Math.min(maxBubbleWidth, thumbnailWidth);
+          }
+        }
+
         int bodyMargins     = ViewUtil.getLeftMargin(bodyText) + ViewUtil.getRightMargin(bodyText);
         int sizeWithMargins = bodyText.getMeasuredWidth() + TEXT_FOOTER_SPACING + footerWidth + bodyMargins;
         int minSize         = Math.min(maxBubbleWidth, Math.max(bodyText.getMeasuredWidth() + TEXT_FOOTER_SPACING + footerWidth + bodyMargins, bodyBubble.getMeasuredWidth()));
@@ -622,10 +643,12 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
 
         if (lineWidthChangedSlightly) {
           if (lastFooterWasCollapsed && ViewUtil.getTopMargin(footer) != collapsedTopMargin) {
-            ViewUtil.setTopMargin(footer, collapsedTopMargin, false);
-            ViewUtil.setBottomMargin(footer, collapsedBottomMargin, false);
-            updatingFooter = true;
-            needsMeasure   = true;
+            if (requiredSpace - FOOTER_POSITION_THRESHOLD <= availableSpace) {
+              ViewUtil.setTopMargin(footer, collapsedTopMargin, false);
+              ViewUtil.setBottomMargin(footer, collapsedBottomMargin, false);
+              updatingFooter = true;
+              needsMeasure   = true;
+            }
           }
         } else {
           if (requiredSpace + FOOTER_POSITION_THRESHOLD <= availableSpace) {
@@ -649,7 +672,10 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
         boolean lineWidthChangedSlightly = Math.abs(currentLineWidth - lastFooterDecisionLineWidth) <= FOOTER_POSITION_THRESHOLD;
 
         if (lineWidthChangedSlightly && lastFooterWasCollapsed) {
-          shouldRevert = false;
+          int currentRequiredSpace = currentLineWidth + TEXT_FOOTER_SPACING + footer.getMeasuredWidth();
+          if (currentRequiredSpace - FOOTER_POSITION_THRESHOLD <= bodyText.getMeasuredWidth()) {
+            shouldRevert = false;
+          }
         }
       }
 
@@ -688,6 +714,17 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
       }
     }
 
+    if (!isViewOnceMessage(messageRecord) && (hasThumbnail(messageRecord) || hasBigImageLinkPreview(messageRecord))) {
+      int thumbnailWidth = mediaThumbnailStub.require().getMeasuredWidth();
+      if (thumbnailWidth > 0 && bodyBubble.getMeasuredWidth() > thumbnailWidth) {
+        bodyBubble.getLayoutParams().width = thumbnailWidth;
+        updatingFooter                     = false;
+        lastFooterDecisionLineWidth        = -1;
+        lastFooterWasCollapsed             = false;
+        needsMeasure                       = true;
+      }
+    }
+
     if (needsMeasure) {
       if (measureCalls < MAX_MEASURE_CALLS) {
         measureCalls++;
@@ -716,10 +753,11 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
     }
 
     if (conversationRecipient.getId().equals(modified.getId())) {
-      setBubbleState(messageRecord, modified, modified.getHasWallpaper(), colorizer);
+      boolean wallpaper = modified.getHasWallpaper() && displayMode.displayWallpaper();
+      setBubbleState(messageRecord, modified, wallpaper, colorizer);
 
       if (quoteView != null) {
-        quoteView.setWallpaperEnabled(modified.getHasWallpaper());
+        quoteView.setWallpaperEnabled(wallpaper);
       }
 
       if (audioViewStub.resolved()) {
@@ -764,6 +802,9 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private @ColorInt int getDefaultBubbleColor(boolean hasWallpaper) {
+    if (isReleaseNotes) {
+      return ContextCompat.getColor(context, R.color.release_notes_bubble);
+    }
     return hasWallpaper ? defaultBubbleColorForWallpaper : defaultBubbleColor;
   }
 
@@ -911,9 +952,18 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
       footer.setOnlyShowSendingStatus(messageRecord.isRemoteDelete(), messageRecord);
     } else {
       bodyBubble.getBackground().setColorFilter(getDefaultBubbleColor(hasWallpaper), PorterDuff.Mode.SRC_IN);
-      footer.setTextColor(colorizer.getIncomingFooterTextColor(context, hasWallpaper));
-      footer.setIconColor(colorizer.getIncomingFooterIconColor(context, hasWallpaper));
-      footer.setRevealDotColor(colorizer.getIncomingFooterIconColor(context, hasWallpaper));
+      if (isReleaseNotes) {
+        int releaseNotesTextColor = ContextCompat.getColor(context, R.color.release_notes_bubble_text);
+        bodyText.setTextColor(releaseNotesTextColor);
+        bodyText.setLinkTextColor(releaseNotesTextColor);
+        footer.setTextColor(releaseNotesTextColor);
+        footer.setIconColor(releaseNotesTextColor);
+        footer.setRevealDotColor(releaseNotesTextColor);
+      } else {
+        footer.setTextColor(colorizer.getIncomingFooterTextColor(context, hasWallpaper));
+        footer.setIconColor(colorizer.getIncomingFooterIconColor(context, hasWallpaper));
+        footer.setRevealDotColor(colorizer.getIncomingFooterIconColor(context, hasWallpaper));
+      }
       footer.setOnlyShowSendingStatus(false, messageRecord);
     }
 
@@ -1010,6 +1060,13 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
    */
   private boolean isContentCondensed() {
     return isCondensedMode() && !previousMessage.isPresent();
+  }
+
+  /**
+   * Whether interactions like swipe-to-reply and direct media opening should be suppressed.
+   */
+  private boolean isSuppressedInteractionMode() {
+    return isCondensedMode() || displayMode instanceof ConversationItemDisplayMode.Starred;
   }
 
   private boolean isStoryReaction(MessageRecord messageRecord) {
@@ -1625,7 +1682,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
       bottomEnd   = 0;
     }
 
-    if (isStartOfMessageCluster(current, previous, isGroupThread) && !current.isOutgoing() && isGroupThread) {
+    if (!(displayMode instanceof ConversationItemDisplayMode.Starred) && isStartOfMessageCluster(current, previous, isGroupThread) && !current.isOutgoing() && isGroupThread) {
       topStart = 0;
       topEnd   = 0;
     }
@@ -1703,8 +1760,8 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
         int end   = messageBody.getSpanEnd(placeholder);
         URLSpan span = new InterceptableLongClickCopyLinkSpan(placeholder.getValue(),
                                                               urlClickListener,
-                                                              ContextCompat.getColor(getContext(), R.color.signal_accent_primary),
-                                                              false);
+                                                              ContextCompat.getColor(getContext(), isReleaseNotes ? R.color.release_notes_bubble_text : R.color.signal_accent_primary),
+                                                              isReleaseNotes);
 
         messageBody.setSpan(span, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
       }
@@ -1833,7 +1890,11 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private void setGutterSizes(@NonNull MessageRecord current, boolean isGroupThread) {
-    if (isGroupThread && current.isOutgoing()) {
+    if (isReleaseNotes) {
+      int gutter = readDimen(R.dimen.conversation_individual_right_gutter);
+      ViewUtil.setPaddingStart(this, gutter);
+      ViewUtil.setPaddingEnd(this, gutter);
+    } else if (isGroupThread && current.isOutgoing()) {
       ViewUtil.setPaddingStart(this, readDimen(R.dimen.conversation_group_left_gutter));
       ViewUtil.setPaddingEnd(this, readDimen(R.dimen.conversation_individual_right_gutter));
     } else if (current.isOutgoing()) {
@@ -1842,6 +1903,18 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
     } else {
       ViewUtil.setPaddingStart(this, readDimen(R.dimen.conversation_individual_received_left_gutter));
       ViewUtil.setPaddingEnd(this, readDimen(R.dimen.conversation_individual_right_gutter));
+    }
+
+    if (isReleaseNotes && normalBubbleParams == null) {
+      RelativeLayout.LayoutParams bubbleParams = (RelativeLayout.LayoutParams) bodyBubble.getLayoutParams();
+
+      normalBubbleParams = new RelativeLayout.LayoutParams(bubbleParams);
+      bubbleParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
+      bubbleParams.setMarginStart(0);
+      bodyBubble.setLayoutParams(bubbleParams);
+    } else if (normalBubbleParams != null && !isReleaseNotes) {
+      bodyBubble.setLayoutParams(normalBubbleParams);
+      normalBubbleParams = null;
     }
   }
 
@@ -1941,7 +2014,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private void setHasBeenQuoted(@NonNull ConversationMessage message) {
-    if (message.hasBeenQuoted() && !isCondensedMode() && quotedIndicator != null && batchSelected.isEmpty() && displayMode != ConversationItemDisplayMode.EditHistory.INSTANCE) {
+    if (message.hasBeenQuoted() && !isSuppressedInteractionMode() && quotedIndicator != null && batchSelected.isEmpty() && displayMode != ConversationItemDisplayMode.EditHistory.INSTANCE) {
       quotedIndicator.setVisibility(VISIBLE);
       quotedIndicator.setOnClickListener(quotedIndicatorClickListener);
     } else if (quotedIndicator != null) {
@@ -1975,7 +2048,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private boolean forceFooter(@NonNull MessageRecord messageRecord) {
-    return hasAudio(messageRecord) || MessageRecordUtil.isEditMessage(messageRecord) || displayMode == ConversationItemDisplayMode.EditHistory.INSTANCE || messageRecord.getPinnedUntil() > 0;
+    return hasAudio(messageRecord) || MessageRecordUtil.isEditMessage(messageRecord) || displayMode == ConversationItemDisplayMode.EditHistory.INSTANCE || messageRecord.getPinnedUntil() > 0 || messageRecord.isStarred();
   }
 
   private boolean forceGroupHeader(@NonNull MessageRecord messageRecord) {
@@ -2011,14 +2084,13 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
     if (groupThread && !messageRecord.isOutgoing()) {
       String senderName  = recipient.getDisplayName(getContext());
       int    senderColor = colorizer.getIncomingGroupSenderColor(getContext(), messageRecord.getFromRecipient());
-      senderWithLabelView.setSender(senderName, senderColor);
-      senderWithLabelView.setLabel(conversationMessage.getMemberLabel());
+      senderWithLabelView.bind(senderName, senderColor, conversationMessage.getMemberLabel());
     }
   }
 
   @SuppressWarnings("ConstantConditions")
   private void setAuthor(@NonNull MessageRecord current, @NonNull Optional<MessageRecord> previous, @NonNull Optional<MessageRecord> next, boolean isGroupThread, boolean hasWallpaper) {
-    if (isGroupThread && !current.isOutgoing()) {
+    if (isGroupThread && !current.isOutgoing() && !(displayMode instanceof ConversationItemDisplayMode.Starred)) {
       contactPhotoHolder.setVisibility(VISIBLE);
 
       if (!previous.isPresent() || previous.get().isUpdate() || !current.getFromRecipient().equals(previous.get().getFromRecipient()) ||
@@ -2054,6 +2126,32 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
 
       if (badgeImageView != null) {
         badgeImageView.setVisibility(GONE);
+      }
+    }
+  }
+
+  private void setStarredSource(@NonNull MessageRecord current, @NonNull ConversationMessage conversationMessage) {
+    if (starredSourceStub == null && starredSourceWrapper == null) return;
+
+    if (displayMode instanceof ConversationItemDisplayMode.Starred) {
+      if (starredSourceWrapper == null) {
+        starredSourceWrapper = starredSourceStub.inflate();
+        starredSourceView    = starredSourceWrapper.findViewById(R.id.conversation_item_starred_source);
+        starredSourceAvatar  = starredSourceWrapper.findViewById(R.id.conversation_item_starred_source_avatar);
+        starredSourceStub    = null;
+      }
+
+      String senderName = current.getFromRecipient().getShortDisplayName(context);
+      String chatName   = conversationMessage.getThreadRecipient().getShortDisplayName(context);
+
+      starredSourceView.setText(context.getString(R.string.StarredMessages__s_chevron_s, senderName, chatName));
+      starredSourceWrapper.setVisibility(VISIBLE);
+      if (starredSourceAvatar != null) {
+        starredSourceAvatar.setAvatar(requestManager, current.getFromRecipient(), false);
+      }
+    } else {
+      if (starredSourceWrapper != null) {
+        starredSourceWrapper.setVisibility(GONE);
       }
     }
   }
@@ -2183,6 +2281,9 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private boolean isStartOfMessageCluster(@NonNull MessageRecord current, @NonNull Optional<MessageRecord> previous, boolean isGroupThread) {
+    if (displayMode instanceof ConversationItemDisplayMode.Starred) {
+      return true;
+    }
     if (isGroupThread) {
       return !previous.isPresent() || previous.get().isUpdate() || !DateUtils.isSameDay(current.getTimestamp(), previous.get().getTimestamp()) ||
              !current.getFromRecipient().equals(previous.get().getFromRecipient()) || !isWithinClusteringTime(current, previous.get()) || MessageRecordUtil.isScheduled(current);
@@ -2194,6 +2295,9 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private boolean isEndOfMessageCluster(@NonNull MessageRecord current, @NonNull Optional<MessageRecord> next, boolean isGroupThread) {
+    if (displayMode instanceof ConversationItemDisplayMode.Starred) {
+      return true;
+    }
     if (isGroupThread) {
       return !next.isPresent() || next.get().isUpdate() || !DateUtils.isSameDay(current.getTimestamp(), next.get().getTimestamp()) ||
              !current.getFromRecipient().equals(next.get().getFromRecipient()) || !current.getReactions().isEmpty() || !isWithinClusteringTime(current, next.get()) ||
@@ -2206,6 +2310,9 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
   }
 
   private boolean isSingularMessage(@NonNull MessageRecord current, @NonNull Optional<MessageRecord> previous, @NonNull Optional<MessageRecord> next, boolean isGroupThread) {
+    if (displayMode instanceof ConversationItemDisplayMode.Starred) {
+      return true;
+    }
     return isStartOfMessageCluster(current, previous, isGroupThread) && isEndOfMessageCluster(current, next, isGroupThread);
   }
 
@@ -2784,7 +2891,7 @@ public final class ConversationItem extends RelativeLayout implements BindableCo
 
   private class ThumbnailClickListener implements SlideClickListener {
     public void onClick(final View v, final Slide slide) {
-      if (shouldInterceptClicks(messageRecord) || !batchSelected.isEmpty() || (isCondensedMode() && (!slide.hasDocument() || (slide.hasDocument() && !MessageRecordUtil.isScheduled(messageRecord))))) {
+      if (shouldInterceptClicks(messageRecord) || !batchSelected.isEmpty() || (isSuppressedInteractionMode() && (!slide.hasDocument() || (slide.hasDocument() && !MessageRecordUtil.isScheduled(messageRecord))))) {
         performClick();
       } else if (!canPlayContent && mediaItem != null && eventListener != null) {
         eventListener.onPlayInlineContent(conversationMessage);

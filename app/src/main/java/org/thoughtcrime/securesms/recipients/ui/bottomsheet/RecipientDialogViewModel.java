@@ -11,7 +11,6 @@ import androidx.annotation.WorkerThread;
 import androidx.fragment.app.FragmentActivity;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
-import androidx.lifecycle.Transformations;
 import androidx.lifecycle.ViewModel;
 import androidx.lifecycle.ViewModelProvider;
 
@@ -19,9 +18,10 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import org.signal.core.util.ThreadUtil;
 import org.signal.core.util.concurrent.SignalExecutors;
+import org.signal.storageservice.storage.protos.groups.AccessControl;
 import org.thoughtcrime.securesms.BlockUnblockDialog;
 import org.thoughtcrime.securesms.R;
-import org.thoughtcrime.securesms.components.settings.conversation.ConversationSettingsActivity;
+import org.thoughtcrime.securesms.components.settings.conversation.ConversationSettingsNavigator;
 import org.thoughtcrime.securesms.conversation.colors.ColorizerV2;
 import org.thoughtcrime.securesms.database.GroupTable;
 import org.thoughtcrime.securesms.database.SignalDatabase;
@@ -52,8 +52,6 @@ import org.thoughtcrime.securesms.verify.VerifyIdentityActivity;
 
 import java.util.Objects;
 import java.util.Optional;
-
-import kotlin.Pair;
 
 import io.reactivex.rxjava3.disposables.CompositeDisposable;
 import io.reactivex.rxjava3.disposables.Disposable;
@@ -92,18 +90,19 @@ final class RecipientDialogViewModel extends ViewModel {
     if (recipientDialogRepository.getGroupId() != null && recipientDialogRepository.getGroupId().isV2() && !recipientIsSelf) {
       LiveGroup source = new LiveGroup(recipientDialogRepository.getGroupId());
 
-      LiveData<Pair<Boolean, Boolean>> localStatus          = LiveDataUtil.combineLatest(source.isSelfAdmin(), Transformations.map(source.getGroupLink(), s -> s == null || s.isEnabled()), Pair::new);
-      LiveData<GroupTable.MemberLevel> recipientMemberLevel = Transformations.switchMap(recipient, source::getMemberLevel);
+      adminActionStatus = LiveDataUtil.combineLatest(source.getGroupRecord(), recipient, (group, r) -> {
+        boolean                      active         = group.isActive();
+        boolean                      localAdmin     = group.isAdmin(Recipient.self());
+        GroupTable.MemberLevel       memberLevel    = group.memberLevel(r);
+        boolean                      inGroup        = memberLevel.isInGroup();
+        boolean                      recipientAdmin = memberLevel == GroupTable.MemberLevel.ADMINISTRATOR;
+        AccessControl.AccessRequired linkAccess     = group.requireV2GroupProperties().getDecryptedGroup().accessControl != null ? group.requireV2GroupProperties().getDecryptedGroup().accessControl.addFromInviteLink
+                                                                                                                                 : AccessControl.AccessRequired.UNKNOWN;
+        boolean                      isLinkActive   = linkAccess == AccessControl.AccessRequired.ANY || linkAccess == AccessControl.AccessRequired.ADMINISTRATOR;
 
-      adminActionStatus = LiveDataUtil.combineLatest(localStatus, recipientMemberLevel, (statuses, memberLevel) -> {
-        boolean localAdmin     = statuses.getFirst();
-        boolean isLinkActive   = statuses.getSecond();
-        boolean inGroup        = memberLevel.isInGroup();
-        boolean recipientAdmin = memberLevel == GroupTable.MemberLevel.ADMINISTRATOR;
-
-        return new AdminActionStatus(inGroup && localAdmin,
-                                     inGroup && localAdmin && !recipientAdmin,
-                                     inGroup && localAdmin && recipientAdmin,
+        return new AdminActionStatus(active && inGroup && localAdmin,
+                                     active && inGroup && localAdmin && !recipientAdmin,
+                                     active && inGroup && localAdmin && recipientAdmin,
                                      isLinkActive);
       });
     } else {
@@ -133,7 +132,7 @@ final class RecipientDialogViewModel extends ViewModel {
 
   private void updateRecipientDetailsState(@NonNull Recipient recipient) {
     GroupId groupId   = recipientDialogRepository.getGroupId();
-    String  aboutText = recipient.isReleaseNotes() ? context.getString(R.string.ReleaseNotes__signal_release_notes_and_news) : recipient.getCombinedAboutAndEmoji();
+    String  aboutText = recipient.isReleaseNotes() ? null : recipient.getCombinedAboutAndEmoji();
 
     if (groupId != null && groupId.isV2() && recipient.isIndividual() && !recipient.isSelf()) {
       SignalExecutors.BOUNDED.execute(() -> {
@@ -222,21 +221,21 @@ final class RecipientDialogViewModel extends ViewModel {
     recipientDialogRepository.getRecipient(recipient -> CommunicationActions.startVideoCall(activity, recipient, onUserAlreadyInAnotherCall));
   }
 
-  void onBlockClicked(@NonNull FragmentActivity activity) {
-    recipientDialogRepository.getRecipient(recipient -> BlockUnblockDialog.showBlockFor(activity, activity.getLifecycle(), recipient, () -> RecipientUtil.blockNonGroup(context, recipient)));
+  void onBlockClicked(@NonNull Recipient recipient) {
+    RecipientUtil.blockNonGroup(context, recipient);
   }
 
-  void onUnblockClicked(@NonNull FragmentActivity activity) {
-    recipientDialogRepository.getRecipient(recipient -> BlockUnblockDialog.showUnblockFor(activity, activity.getLifecycle(), recipient, () -> RecipientUtil.unblock(recipient)));
+  void onUnblockClicked(@NonNull Recipient recipient) {
+    RecipientUtil.unblock(recipient);
   }
 
   void onViewSafetyNumberClicked(@NonNull Activity activity, @NonNull IdentityRecord identityRecord) {
     VerifyIdentityActivity.startOrShowExchangeMessagesDialog(activity, identityRecord);
   }
 
-  void onAvatarClicked(@NonNull Activity activity) {
+  void onAvatarClicked(@NonNull FragmentActivity activity) {
     if (storyViewState.getValue() == null || storyViewState.getValue() == StoryViewState.NONE) {
-      activity.startActivity(ConversationSettingsActivity.forRecipient(activity, recipientDialogRepository.getRecipientId()));
+      recipientDialogRepository.getRecipient(recipient -> ConversationSettingsNavigator.navigate(activity, recipient));
     } else {
       activity.startActivity(StoryViewerActivity.createIntent(
           activity,

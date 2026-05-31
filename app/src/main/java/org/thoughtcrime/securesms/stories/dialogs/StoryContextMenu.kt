@@ -1,9 +1,11 @@
 package org.thoughtcrime.securesms.stories.dialogs
 
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -21,10 +23,12 @@ import org.thoughtcrime.securesms.attachments.Attachment
 import org.thoughtcrime.securesms.attachments.AttachmentSaver
 import org.thoughtcrime.securesms.components.menu.ActionItem
 import org.thoughtcrime.securesms.components.menu.SignalContextMenu
+import org.thoughtcrime.securesms.database.SignalDatabase
 import org.thoughtcrime.securesms.database.model.MessageRecord
 import org.thoughtcrime.securesms.database.model.MmsMessageRecord
 import org.thoughtcrime.securesms.database.model.databaseprotos.StoryTextPost
 import org.thoughtcrime.securesms.providers.BlobProvider
+import org.thoughtcrime.securesms.sharing.v2.ShareActivity
 import org.thoughtcrime.securesms.stories.StoryTextPostModel
 import org.thoughtcrime.securesms.stories.landing.StoriesLandingItem
 import org.thoughtcrime.securesms.stories.viewer.page.StoryPost
@@ -40,14 +44,26 @@ object StoryContextMenu {
 
   private val TAG = Log.tag(StoryContextMenu::class.java)
 
-  fun delete(context: Context, records: Set<MessageRecord>): Single<Boolean> {
-    return DeleteDialog.show(
-      context = context,
-      messageRecords = records,
-      title = context.getString(R.string.MyStories__delete_story),
-      message = context.getString(R.string.MyStories__this_story_will_be_deleted),
-      forceRemoteDelete = true
-    ).map { (_, deletedThread) -> deletedThread }
+  fun delete(context: Context, record: MessageRecord): Single<Boolean> {
+    val recipient = record.toRecipient
+    val isGroupTerminated = recipient.isPushV2Group && !SignalDatabase.groups.isActive(recipient.requireGroupId())
+
+    return if (isGroupTerminated) {
+      DeleteDialog.show(
+        context = context,
+        messageRecords = setOf(record),
+        title = context.getString(R.string.MyStories__delete_story),
+        message = context.getString(R.string.MyStories__delete_story_terminated_group)
+      ).map { (_, deletedThread) -> deletedThread }
+    } else {
+      DeleteDialog.show(
+        context = context,
+        messageRecords = setOf(record),
+        title = context.getString(R.string.MyStories__delete_story),
+        message = context.getString(R.string.MyStories__this_story_will_be_deleted),
+        forceRemoteDelete = true
+      ).map { (_, deletedThread) -> deletedThread }
+    }
   }
 
   suspend fun save(fragment: Fragment, messageRecord: MessageRecord) {
@@ -105,11 +121,17 @@ object StoryContextMenu {
     } else {
       val attachment: Attachment = messageRecord.slideDeck.firstSlide!!.asAttachment()
 
-      ShareCompat.IntentBuilder(fragment.requireContext())
+      val chooserIntent = ShareCompat.IntentBuilder(fragment.requireContext())
         .setStream(attachment.publicUri)
         .setType(attachment.contentType)
         .createChooserIntent()
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+      if (Build.VERSION.SDK_INT < 34) {
+        chooserIntent.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(fragment.requireContext(), ShareActivity::class.java)))
+      }
+
+      chooserIntent
     }
 
     try {
@@ -229,7 +251,7 @@ object StoryContextMenu {
           }
         )
         add(
-          ActionItem(R.drawable.symbol_save_android_24, context.getString(R.string.save)) {
+          ActionItem(CoreUiR.drawable.symbol_save_android_24, context.getString(R.string.save)) {
             callbacks.onSave()
           }
         )
